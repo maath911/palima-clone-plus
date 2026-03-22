@@ -17,6 +17,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
 html,body,#root{height:100%;width:100%}
@@ -760,6 +761,355 @@ const findDestination=(query)=>{
   return null;
 };
 
+/* ══ ONBOARDING MODAL ═══════════════════════════════════ */
+const OnboardingModal=({deviceId,onDone})=>{
+  const [step,setStep]=useState(0);
+  const [copied,setCopied]=useState(false);
+  const steps=[
+    {icon:'🌍',title:'Bienvenue sur Palima+',sub:'Ton compagnon de voyage gratuit',body:'Planifie vols, hôtels, activités et budget — tout au même endroit, synchronisé dans le cloud.'},
+    {icon:'🔑',title:'Note ton code appareil',sub:'IMPORTANT — Ne passe pas cette étape',body:'Ce code unique identifie tes données. Sans lui, tu ne pourras pas récupérer tes voyages si tu changes de téléphone ou de navigateur.'},
+    {icon:'🚀',title:'Prêt à partir !',sub:'3 choses à savoir',body:''},
+  ];
+  const copyCode=()=>{navigator.clipboard.writeText(deviceId).catch(()=>{});setCopied(true);};
+  return(
+    <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.95)',backdropFilter:'blur(20px)',zIndex:500,display:'flex',alignItems:'center',justifyContent:'center',padding:'20px'}}>
+      <div className="scale-in" style={{background:'#0d0d0d',borderRadius:24,width:'100%',maxWidth:400,padding:'32px 28px',border:'1px solid rgba(255,255,255,.08)'}}>
+        <div style={{display:'flex',gap:6,marginBottom:28}}>{steps.map((_,i)=><div key={i} style={{flex:1,height:3,borderRadius:3,background:i<=step?'#007AFF':'rgba(255,255,255,.1)',transition:'background .3s'}}/>)}</div>
+        <div style={{textAlign:'center',marginBottom:24}}>
+          <div style={{fontSize:52,marginBottom:16}}>{steps[step].icon}</div>
+          <h2 style={{fontFamily:'Syne,sans-serif',fontSize:22,fontWeight:800,marginBottom:6}}>{steps[step].title}</h2>
+          <p style={{fontSize:13,color:'#FF9F0A',fontWeight:600,marginBottom:16}}>{steps[step].sub}</p>
+          {step===0&&<p style={{fontSize:14,color:'rgba(255,255,255,.6)',lineHeight:1.7}}>{steps[0].body}</p>}
+          {step===1&&(
+            <div>
+              <p style={{fontSize:13,color:'rgba(255,255,255,.5)',lineHeight:1.6,marginBottom:16}}>{steps[1].body}</p>
+              <div style={{background:'#1a1a1a',borderRadius:12,padding:'14px 16px',fontFamily:'monospace',fontSize:12,color:'#5AC8FA',wordBreak:'break-all',marginBottom:12,border:'1px solid rgba(90,200,250,.2)'}}>{deviceId}</div>
+              <button onClick={copyCode} style={{width:'100%',background:copied?'rgba(48,209,88,.2)':'rgba(0,122,255,.15)',border:`1.5px solid ${copied?'#30D158':'#007AFF'}`,borderRadius:13,padding:'13px',fontWeight:700,fontSize:15,color:copied?'#30D158':'#007AFF',display:'flex',alignItems:'center',justifyContent:'center',gap:8}}>
+                {copied?'✅ Code copié ! Continue →':'📋 Copier mon code'}
+              </button>
+              {!copied&&<p style={{fontSize:11,color:'rgba(255,69,58,.6)',marginTop:8,textAlign:'center'}}>⚠️ Copie ce code avant de continuer</p>}
+            </div>
+          )}
+          {step===2&&(
+            <div style={{display:'flex',flexDirection:'column',gap:10,textAlign:'left'}}>
+              {[{i:'🧠',t:'Guide IA intégré',d:'Quand partir, quartiers, hôtels avec fourchettes de prix pour 78 destinations'},
+                {i:'🔗',t:'Partage collaboratif',d:'Génère un lien pour que tes amis puissent voir et modifier le voyage'},
+                {i:'📄',t:'Export PDF',d:'Génère un carnet de voyage complet à emporter à l'aéroport'},
+              ].map(x=>(<div key={x.t} style={{background:'rgba(255,255,255,.04)',borderRadius:14,padding:'12px 14px',display:'flex',gap:12,alignItems:'flex-start'}}>
+                <span style={{fontSize:22,flexShrink:0}}>{x.i}</span>
+                <div><p style={{fontSize:14,fontWeight:700,marginBottom:3}}>{x.t}</p><p style={{fontSize:12,color:'rgba(255,255,255,.5)',lineHeight:1.5}}>{x.d}</p></div>
+              </div>))}
+            </div>
+          )}
+        </div>
+        <button onClick={()=>{if(step===1&&!copied)return;if(step<2)setStep(s=>s+1);else onDone();}} style={{width:'100%',background:step===1&&!copied?'rgba(255,255,255,.08)':'#007AFF',border:'none',borderRadius:14,padding:'15px',fontFamily:'Syne,sans-serif',fontWeight:800,fontSize:16,color:step===1&&!copied?'rgba(255,255,255,.3)':'#fff',cursor:step===1&&!copied?'not-allowed':'pointer',transition:'all .2s'}}>
+          {step===0?'Commencer →':step===1?copied?'Parfait, continuer →':'Copie d'abord le code':'🚀 Créer mon premier voyage'}
+        </button>
+        {step>0&&<button onClick={()=>setStep(s=>s-1)} style={{width:'100%',background:'none',border:'none',color:'rgba(255,255,255,.3)',fontSize:13,marginTop:10,cursor:'pointer'}}>← Retour</button>}
+      </div>
+    </div>
+  );
+};
+
+/* ══ CURRENCY CONVERTER ══════════════════════════════════ */
+const CURRENCIES_LIST=['EUR','USD','GBP','JPY','CAD','AUD','CHF','MAD','TND','MXN','SGD','THB','AED','IDR','VND','INR','BRL','CLP','CZK','HUF','PLN','RON','TRY','KRW','HKD','TWD','NZD','ZAR','EGP','KES','TZS'];
+const useCurrencyRates=()=>{
+  const [rates,setRates]=useState(null);
+  useEffect(()=>{
+    const cached=localStorage.getItem('palima_fx');
+    if(cached){try{const d=JSON.parse(cached);if(Date.now()-d.ts<86400000){setRates(d.rates);return;}}catch{}}
+    fetch('https://api.exchangerate-api.com/v4/latest/EUR').then(r=>r.json()).then(d=>{if(d.rates){localStorage.setItem('palima_fx',JSON.stringify({ts:Date.now(),rates:d.rates}));setRates(d.rates);}}).catch(()=>{});
+  },[]);
+  const convert=(amount,from,to)=>{if(!rates||!amount)return '';const inEur=from==='EUR'?+amount:(+amount/rates[from]);const result=to==='EUR'?inEur:inEur*rates[to];return isNaN(result)?'':result.toLocaleString('fr-FR',{maximumFractionDigits:2});};
+  return{rates,convert};
+};
+
+const CurrencyModal=({onClose,tripCurrency})=>{
+  const {rates,convert}=useCurrencyRates();
+  const [amount,setAmount]=useState('100');
+  const [from,setFrom]=useState(tripCurrency||'EUR');
+  const [to,setTo]=useState(tripCurrency&&tripCurrency!=='EUR'?'EUR':'USD');
+  const swap=()=>{setFrom(to);setTo(from);};
+  const result=convert(amount,from,to);
+  const COMMON_PAIRS=[['EUR','USD'],['EUR','GBP'],['EUR','JPY'],['EUR','MAD'],['EUR','THB'],['EUR','IDR'],['USD','EUR'],['GBP','EUR']];
+  return(
+    <div onClick={onClose} style={{position:'fixed',inset:0,background:'rgba(0,0,0,.8)',backdropFilter:'blur(12px)',zIndex:250,display:'flex',alignItems:'flex-end',justifyContent:'center'}}>
+      <div onClick={e=>e.stopPropagation()} className="slide-bottom" style={{background:'#111',borderRadius:'24px 24px 0 0',width:'100%',maxWidth:520,padding:'24px 22px 48px'}}>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:20}}>
+          <h2 style={{fontFamily:'Syne,sans-serif',fontSize:20,fontWeight:800}}>💱 Convertisseur</h2>
+          <div style={{display:'flex',gap:8,alignItems:'center'}}>
+            {!rates&&<span style={{fontSize:11,color:'#FF9F0A'}}>⟳ Chargement...</span>}
+            {rates&&<span style={{fontSize:11,color:'#30D158'}}>✓ Taux du jour</span>}
+            <button onClick={onClose} style={{background:'rgba(255,255,255,.08)',borderRadius:10,color:'rgba(255,255,255,.5)',width:32,height:32,display:'flex',alignItems:'center',justifyContent:'center'}}>✕</button>
+          </div>
+        </div>
+        <div style={{background:'rgba(255,255,255,.04)',borderRadius:18,padding:'20px',marginBottom:14}}>
+          <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:16}}>
+            <div style={{flex:1}}>
+              <label style={{fontSize:11,color:'rgba(255,255,255,.4)',display:'block',marginBottom:6}}>Montant</label>
+              <input type="number" value={amount} onChange={e=>setAmount(e.target.value)} style={{fontSize:22,fontWeight:800,padding:'10px 14px',borderRadius:12}} placeholder="100"/>
+            </div>
+            <div style={{flex:1}}>
+              <label style={{fontSize:11,color:'rgba(255,255,255,.4)',display:'block',marginBottom:6}}>De</label>
+              <select value={from} onChange={e=>setFrom(e.target.value)} style={{fontSize:16,fontWeight:700,padding:'10px 14px',borderRadius:12}}>{CURRENCIES_LIST.map(c=><option key={c} value={c}>{c}</option>)}</select>
+            </div>
+          </div>
+          <button onClick={swap} style={{width:'100%',background:'rgba(0,122,255,.1)',border:'1px solid rgba(0,122,255,.25)',borderRadius:12,padding:'10px',fontSize:18,marginBottom:16}}>⇅ Inverser</button>
+          <div style={{flex:1,marginBottom:0}}>
+            <label style={{fontSize:11,color:'rgba(255,255,255,.4)',display:'block',marginBottom:6}}>Vers</label>
+            <select value={to} onChange={e=>setTo(e.target.value)} style={{fontSize:16,fontWeight:700,padding:'10px 14px',borderRadius:12}}>{CURRENCIES_LIST.map(c=><option key={c} value={c}>{c}</option>)}</select>
+          </div>
+        </div>
+        {result&&(
+          <div className="pop-in" style={{background:'rgba(0,122,255,.12)',border:'1.5px solid rgba(0,122,255,.35)',borderRadius:18,padding:'20px',textAlign:'center',marginBottom:14}}>
+            <p style={{fontSize:13,color:'rgba(255,255,255,.4)',marginBottom:6}}>{amount} {from} =</p>
+            <p style={{fontFamily:'Syne,sans-serif',fontSize:36,fontWeight:800,color:'#007AFF'}}>{result} {to}</p>
+            {rates&&<p style={{fontSize:11,color:'rgba(255,255,255,.25)',marginTop:6}}>1 {from} = {convert(1,from,to)} {to}</p>}
+          </div>
+        )}
+        <div>
+          <p style={{fontSize:11,color:'rgba(255,255,255,.3)',marginBottom:8,fontWeight:700,textTransform:'uppercase',letterSpacing:1}}>Conversions rapides</p>
+          <div style={{display:'flex',flexWrap:'wrap',gap:7}}>
+            {COMMON_PAIRS.map(([f,t])=>(
+              <button key={f+t} onClick={()=>{setFrom(f);setTo(t);}} style={{background:from===f&&to===t?'rgba(0,122,255,.2)':'rgba(255,255,255,.06)',border:`1px solid ${from===f&&to===t?'rgba(0,122,255,.4)':'rgba(255,255,255,.1)'}`,borderRadius:9,padding:'7px 12px',fontSize:12,fontWeight:700,color:from===f&&to===t?'#007AFF':'rgba(255,255,255,.6)'}}>
+                {f} → {t}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+/* ══ PDF EXPORT ══════════════════════════════════════════ */
+const exportTripPDF=async(trip)=>{
+  const {jsPDF}=window.jspdf||{};
+  if(!jsPDF){alert('PDF non disponible. Vérifiez votre connexion.');return;}
+  const doc=new jsPDF({orientation:'portrait',unit:'mm',format:'a4'});
+  const W=210,M=20;let y=M;
+  const nl=(h=6)=>{y+=h;if(y>270){doc.addPage();y=M;}};
+  const txt=(text,x,size=11,style='normal',color=[255,255,255])=>{doc.setFontSize(size);doc.setFont('helvetica',style);doc.setTextColor(...color);doc.text(String(text),x,y);};
+  const line=()=>{doc.setDrawColor(60,60,60);doc.line(M,y,W-M,y);nl(4);};
+  const rect=(x,yw,h,r,g,b)=>{doc.setFillColor(r,g,b);doc.roundedRect(x,y-4,yw,h,2,2,'F');};
+
+  // Cover
+  doc.setFillColor(0,0,0);doc.rect(0,0,210,297,'F');
+  doc.setFillColor(10,10,30);doc.rect(0,0,210,100,'F');
+  y=35;txt(trip.cover_emoji||'✈️',M,32);
+  y=52;txt(trip.title||'Mon voyage',M,22,'bold',[255,255,255]);
+  y=62;txt('📍 '+(trip.destination||''),M,13,'normal',[150,150,200]);
+  if(trip.start_date){y=72;txt('📅 '+(new Date(trip.start_date+'T00:00:00').toLocaleDateString('fr-FR',{day:'2-digit',month:'long',year:'numeric'})),M,11,'normal',[120,120,180]);}
+  if(trip.end_date){y=79;txt('→ '+(new Date(trip.end_date+'T00:00:00').toLocaleDateString('fr-FR',{day:'2-digit',month:'long',year:'numeric'})),M+8,11,'normal',[120,120,180]);}
+  y=90;txt('Carnet de voyage • Palima Clone Plus',M,9,'normal',[80,80,120]);
+
+  // Stats bar
+  y=108;
+  const fl=trip.flights||[];const ho=trip.accommodations||[];const ac=trip.activities||[];const bi=trip.budget_items||[];
+  const total=fl.reduce((s,f)=>s+(+f.price||0),0)+ho.reduce((s,h)=>s+(+h.total_price||0),0)+ac.reduce((s,a)=>s+(+a.price||0),0)+bi.reduce((s,b)=>s+(b.actual!=null?+b.actual:+b.estimated||0),0);
+  const stats=[['✈️ Vols',fl.length],['🏨 Nuits',ho.reduce((s,h)=>{const n=(new Date(h.check_out)-new Date(h.check_in))/86400000;return s+(n>0?Math.ceil(n):0);},0)],['🎯 Activités',ac.length],['💰 Total',`${Math.round(total)}€`]];
+  stats.forEach((s,i)=>{
+    const x=M+i*42;
+    doc.setFillColor(20,20,40);doc.roundedRect(x,y-5,38,16,2,2,'F');
+    doc.setFontSize(8);doc.setFont('helvetica','normal');doc.setTextColor(120,120,180);doc.text(String(s[0]),x+4,y+2);
+    doc.setFontSize(11);doc.setFont('helvetica','bold');doc.setTextColor(255,255,255);doc.text(String(s[1]),x+4,y+9);
+  });
+
+  y=135;
+
+  // Flights section
+  if(fl.length>0){
+    doc.setFillColor(0,60,120);doc.roundedRect(M-2,y-5,W-2*M+4,8,2,2,'F');
+    txt('✈️  VOLS',M,12,'bold',[255,255,255]);nl(10);
+    fl.forEach(f=>{
+      const dep=f.departure_datetime?new Date(f.departure_datetime).toLocaleDateString('fr-FR',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}):'—';
+      const type_label=f.type==='outbound'?'Aller':f.type==='return'?'Retour':'Escale';
+      txt(`${type_label}: ${f.origin_iata||'?'} → ${f.destination_iata||'?'}`,M,10,'bold',[200,200,255]);
+      txt(f.airline||'',M+80,10,'normal',[150,150,150]);
+      if(f.price>0){doc.setFontSize(10);doc.setFont('helvetica','bold');doc.setTextColor(100,150,255);doc.text(`${f.price}€`,W-M-10,y,{align:'right'});}
+      nl(5);
+      txt(dep,M+4,9,'normal',[130,130,180]);
+      if(f.booking_ref)txt(`Réf: ${f.booking_ref}`,M+80,9,'normal',[130,130,130]);
+      nl(7);
+    });
+    nl(4);
+  }
+
+  // Accommodations section
+  if(ho.length>0){
+    doc.setFillColor(60,0,120);doc.roundedRect(M-2,y-5,W-2*M+4,8,2,2,'F');
+    txt('🏨  HÉBERGEMENTS',M,12,'bold',[255,255,255]);nl(10);
+    ho.forEach(h=>{
+      const cin=h.check_in?new Date(h.check_in+'T00:00:00').toLocaleDateString('fr-FR',{day:'2-digit',month:'short'}):'?';
+      const cout=h.check_out?new Date(h.check_out+'T00:00:00').toLocaleDateString('fr-FR',{day:'2-digit',month:'short'}):'?';
+      txt(h.name||'Hébergement',M,10,'bold',[200,150,255]);
+      if(h.total_price>0){doc.setFontSize(10);doc.setFont('helvetica','bold');doc.setTextColor(150,100,255);doc.text(`${h.total_price}€`,W-M-10,y,{align:'right'});}
+      nl(5);
+      txt(`${cin} → ${cout}${h.address?'  •  '+h.address:''}`,M+4,9,'normal',[150,120,200]);
+      if(h.booking_ref)txt(`Réf: ${h.booking_ref}`,M+4,9,'normal',[130,130,130]);
+      nl(7);
+    });
+    nl(4);
+  }
+
+  // Activities by date
+  if(ac.length>0){
+    doc.setFillColor(0,80,50);doc.roundedRect(M-2,y-5,W-2*M+4,8,2,2,'F');
+    txt('🎯  ACTIVITÉS',M,12,'bold',[255,255,255]);nl(10);
+    const sorted=[...ac].sort((a,b)=>(a.date||'').localeCompare(b.date||''));
+    let lastDate='';
+    sorted.forEach(a=>{
+      if(a.date&&a.date!==lastDate){
+        lastDate=a.date;
+        const d=new Date(a.date+'T00:00:00').toLocaleDateString('fr-FR',{weekday:'long',day:'2-digit',month:'long'});
+        nl(2);txt('— '+d+' —',M,9,'italic',[100,160,100]);nl(6);
+      }
+      const timeStr=a.start_time?` • ${a.start_time}`:'';
+      txt(`${a.title}${timeStr}`,M+4,10,'normal',[200,255,200]);
+      if(a.price>0){doc.setFontSize(9);doc.setFont('helvetica','normal');doc.setTextColor(100,180,100);doc.text(`${a.price}€`,W-M-10,y,{align:'right'});}
+      nl(6);
+    });
+    nl(4);
+  }
+
+  // Budget summary
+  const budget=+trip.total_budget||0;
+  if(budget>0||total>0){
+    doc.setFillColor(80,50,0);doc.roundedRect(M-2,y-5,W-2*M+4,8,2,2,'F');
+    txt('💰  BUDGET',M,12,'bold',[255,255,255]);nl(12);
+    const items=[['Vols',fl.reduce((s,f)=>s+(+f.price||0),0)],['Hébergements',ho.reduce((s,h)=>s+(+h.total_price||0),0)],['Activités',ac.reduce((s,a)=>s+(+a.price||0),0)],['Divers',bi.reduce((s,b)=>s+(b.actual!=null?+b.actual:+b.estimated||0),0)]];
+    items.filter(([,v])=>v>0).forEach(([k,v])=>{
+      txt(k,M+4,10,'normal',[200,180,100]);
+      doc.setFontSize(10);doc.setFont('helvetica','bold');doc.setTextColor(255,220,100);doc.text(`${Math.round(v)}€`,W-M-10,y,{align:'right'});nl(6);
+    });
+    nl(2);doc.setDrawColor(100,80,0);doc.line(M,y,W-M,y);nl(4);
+    txt('TOTAL DÉPENSÉ',M+4,11,'bold',[255,200,50]);
+    doc.setFontSize(13);doc.setFont('helvetica','bold');doc.setTextColor(255,220,80);doc.text(`${Math.round(total)}€`,W-M-10,y,{align:'right'});nl(7);
+    if(budget>0){
+      txt(`Budget prévu: ${Math.round(budget)}€`,M+4,10,'normal',[150,150,100]);
+      const reste=budget-total;
+      doc.setFontSize(10);doc.setFont('helvetica','bold');doc.setTextColor(reste>=0?100:255,reste>=0?200:80,reste>=0?100:80);doc.text(reste>=0?`Reste: ${Math.round(reste)}€`:`Dépassement: +${Math.round(Math.abs(reste))}€`,W-M-10,y,{align:'right'});nl(7);
+    }
+  }
+
+  // Checklist
+  const cl=trip.checklist||[];
+  if(cl.length>0){
+    if(y>230){doc.addPage();y=M;}
+    nl(6);
+    doc.setFillColor(20,20,50);doc.roundedRect(M-2,y-5,W-2*M+4,8,2,2,'F');
+    txt('✅  CHECKLIST PRÉ-DÉPART',M,12,'bold',[255,255,255]);nl(10);
+    const cats=[...new Set(cl.map(c=>c.cat))];
+    cats.forEach(cat=>{
+      txt(cat.toUpperCase(),M,9,'bold',[120,120,180]);nl(6);
+      cl.filter(c=>c.cat===cat).forEach(item=>{
+        const mark=item.checked?'☑':'☐';
+        doc.setFontSize(10);doc.setFont('helvetica','normal');doc.setTextColor(item.checked?100:200,item.checked?160:200,item.checked?100:200);
+        doc.text(`  ${mark}  ${item.label}`,M+4,y);nl(6);
+      });
+    });
+  }
+
+  // Notes
+  if(trip.notes){
+    if(y>240){doc.addPage();y=M;}
+    nl(6);
+    doc.setFillColor(20,30,40);doc.roundedRect(M-2,y-5,W-2*M+4,8,2,2,'F');
+    txt('📝  NOTES',M,12,'bold',[255,255,255]);nl(10);
+    const lines=doc.splitTextToSize(trip.notes,W-2*M-8);
+    lines.forEach(line=>{doc.setFontSize(10);doc.setFont('helvetica','normal');doc.setTextColor(180,180,200);doc.text(line,M+4,y);nl(6);});
+  }
+
+  // Footer
+  doc.setPage(1);
+  doc.setFontSize(8);doc.setFont('helvetica','normal');doc.setTextColor(60,60,80);
+  doc.text(`Exporté par Palima Clone Plus • ${new Date().toLocaleDateString('fr-FR')}`,M,290);
+  doc.text('palima-plus.netlify.app',W-M,290,{align:'right'});
+
+  doc.save(`${(trip.title||'voyage').replace(/[^a-z0-9]/gi,'_')}_palima.pdf`);
+};
+
+/* ══ COLLAB MANAGER ══════════════════════════════════════ */
+const CollabModal=({trip,onClose,onUpdate,deviceId})=>{
+  const [copied,setCopied]=useState(false);
+  const [generating,setGenerating]=useState(false);
+
+  const collabToken=trip.collab_token;
+  const collabUrl=collabToken?`${location.origin}${location.pathname}?collab=${collabToken}`:'';
+
+  const enableCollab=async()=>{
+    setGenerating(true);
+    const token=crypto.randomUUID?crypto.randomUUID():`collab_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    const updated={...trip,collab_token:token};
+    try{
+      await SB.upsertByCollab(token,updated);
+      onUpdate(updated);
+    }catch(e){console.error(e);}
+    setGenerating(false);
+  };
+
+  const disableCollab=async()=>{
+    if(!window.confirm('Désactiver le partage ? Le lien existant ne fonctionnera plus.'))return;
+    const updated={...trip,collab_token:null};
+    onUpdate(updated);
+  };
+
+  const copyLink=()=>{navigator.clipboard.writeText(collabUrl).catch(()=>{});setCopied(true);setTimeout(()=>setCopied(false),3000);};
+
+  return(
+    <div onClick={onClose} style={{position:'fixed',inset:0,background:'rgba(0,0,0,.85)',backdropFilter:'blur(12px)',zIndex:250,display:'flex',alignItems:'flex-end',justifyContent:'center'}}>
+      <div onClick={e=>e.stopPropagation()} className="slide-bottom" style={{background:'#111',borderRadius:'24px 24px 0 0',width:'100%',maxWidth:520,padding:'24px 22px 52px'}}>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:20}}>
+          <h2 style={{fontFamily:'Syne,sans-serif',fontSize:20,fontWeight:800}}>👥 Partage collaboratif</h2>
+          <button onClick={onClose} style={{background:'rgba(255,255,255,.08)',borderRadius:10,color:'rgba(255,255,255,.5)',width:32,height:32,display:'flex',alignItems:'center',justifyContent:'center'}}>✕</button>
+        </div>
+
+        {!collabToken?(
+          <div>
+            <div style={{background:'rgba(0,122,255,.08)',border:'1px solid rgba(0,122,255,.2)',borderRadius:16,padding:'18px',marginBottom:16}}>
+              <p style={{fontSize:15,fontWeight:700,marginBottom:8}}>🔗 Activer le partage</p>
+              <p style={{fontSize:13,color:'rgba(255,255,255,.5)',lineHeight:1.7,marginBottom:12}}>
+                Génère un lien unique. Toute personne avec ce lien pourra <strong style={{color:'#fff'}}>voir et modifier</strong> ce voyage en temps réel.
+              </p>
+              <div style={{display:'flex',flexDirection:'column',gap:6}}>
+                {['✈️ Ajouter des vols et hôtels','🎯 Planifier des activités','💰 Suivre le budget partagé','✅ Cocher la checklist'].map(t=>(<div key={t} style={{fontSize:12,color:'rgba(255,255,255,.6)',display:'flex',alignItems:'center',gap:8}}><span style={{color:'#30D158'}}>✓</span>{t}</div>))}
+              </div>
+            </div>
+            <button onClick={enableCollab} disabled={generating} style={{width:'100%',background:'#007AFF',borderRadius:14,padding:'15px',fontWeight:700,fontSize:15,color:'#fff',display:'flex',alignItems:'center',justifyContent:'center',gap:8,opacity:generating?.7:1}}>
+              {generating?<span className="spin" style={{display:'inline-block',width:16,height:16,border:'2px solid #fff',borderTopColor:'transparent',borderRadius:'50%'}}/>:'🔗 Générer le lien de partage'}
+            </button>
+            <div style={{background:'rgba(255,69,58,.08)',border:'1px solid rgba(255,69,58,.2)',borderRadius:12,padding:'10px 14px',marginTop:12}}>
+              <p style={{fontSize:12,color:'rgba(255,69,58,.8)',lineHeight:1.5}}>⚠️ Partage avec des personnes de confiance — elles auront un accès complet au voyage.</p>
+            </div>
+          </div>
+        ):(
+          <div>
+            <div style={{background:'rgba(48,209,88,.08)',border:'1px solid rgba(48,209,88,.25)',borderRadius:16,padding:'14px 16px',marginBottom:14,display:'flex',alignItems:'center',gap:10}}>
+              <span style={{fontSize:22}}>✅</span>
+              <div><p style={{fontSize:13,fontWeight:700,color:'#30D158'}}>Partage actif</p><p style={{fontSize:11,color:'rgba(255,255,255,.4)',marginTop:2}}>N'importe qui avec ce lien peut modifier le voyage</p></div>
+            </div>
+            <div style={{background:'rgba(255,255,255,.04)',border:'1px solid rgba(255,255,255,.1)',borderRadius:12,padding:'12px 14px',marginBottom:10}}>
+              <p style={{fontSize:10,color:'rgba(255,255,255,.3)',marginBottom:6,fontWeight:700,textTransform:'uppercase',letterSpacing:1}}>Lien de partage</p>
+              <p style={{fontSize:11,fontFamily:'monospace',color:'#5AC8FA',wordBreak:'break-all',lineHeight:1.5}}>{collabUrl}</p>
+            </div>
+            <div style={{display:'flex',gap:8,marginBottom:10}}>
+              <button onClick={copyLink} style={{flex:2,background:copied?'rgba(48,209,88,.2)':'rgba(0,122,255,.15)',border:`1.5px solid ${copied?'#30D158':'#007AFF'}`,borderRadius:13,padding:'13px',fontWeight:700,fontSize:14,color:copied?'#30D158':'#007AFF',display:'flex',alignItems:'center',justifyContent:'center',gap:8}}>
+                {copied?'✅ Lien copié !':'📋 Copier le lien'}
+              </button>
+              <button onClick={()=>{const text=`🌍 Je planifie notre voyage : ${trip.title}\n📍 ${trip.destination}\n\nModifie le voyage ici :\n${collabUrl}`;navigator.share?navigator.share({title:trip.title,text,url:collabUrl}).catch(()=>{}):navigator.clipboard.writeText(text).catch(()=>{});}} style={{flex:1,background:'rgba(48,209,88,.15)',border:'1px solid rgba(48,209,88,.35)',borderRadius:13,padding:'13px',fontWeight:700,fontSize:14,color:'#30D158',display:'flex',alignItems:'center',justifyContent:'center',gap:6}}>
+                📤 Partager
+              </button>
+            </div>
+            <button onClick={disableCollab} style={{width:'100%',background:'rgba(255,69,58,.08)',border:'1px solid rgba(255,69,58,.2)',borderRadius:13,padding:'11px',fontWeight:600,fontSize:13,color:'rgba(255,69,58,.7)'}}>
+              🔒 Désactiver le partage
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
 /* ══ SMART ADVISOR MODAL ════════════════════════════════ */
 const MONTH_NAMES=['Jan','Fév','Mar','Avr','Mai','Juin','Juil','Août','Sep','Oct','Nov','Déc'];
 const MONTH_FULL=['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
@@ -1174,13 +1524,17 @@ const SB_URL='https://ntjfarocckcepwkgzrzb.supabase.co';
 const SB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im50amZhcm9jY2tjZXB3a2d6cnpiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQxODI3NjksImV4cCI6MjA4OTc1ODc2OX0.VHOnQAwthE6uWOTWyCSpNdq5ZG59sUNfamVj4WuJiFM';
 const sbFetch=async(path,opts={})=>{const r=await fetch(`${SB_URL}/rest/v1/${path}`,{...opts,headers:{'apikey':SB_KEY,'Authorization':`Bearer ${SB_KEY}`,'Content-Type':'application/json','Prefer':'return=representation',...(opts.headers||{})}});if(!r.ok)throw new Error(await r.text());const t=await r.text();return t?JSON.parse(t):null;};
 const SB={
-  upsertTrip:async(did,trip)=>sbFetch('trips',{method:'POST',headers:{'Prefer':'resolution=merge-duplicates,return=minimal'},body:JSON.stringify({device_id:did,trip_id:trip.id,data:trip})}),
+  upsertTrip:async(did,trip)=>sbFetch('trips',{method:'POST',headers:{'Prefer':'resolution=merge-duplicates,return=minimal'},body:JSON.stringify({device_id:did,trip_id:trip.id,data:trip,collab_token:trip.collab_token||null})}),
   fetchTrips:async(did)=>sbFetch(`trips?device_id=eq.${encodeURIComponent(did)}&select=data,updated_at&order=updated_at.desc`),
   deleteTrip:async(did,tid)=>sbFetch(`trips?device_id=eq.${encodeURIComponent(did)}&trip_id=eq.${encodeURIComponent(tid)}`,{method:'DELETE'}),
+  fetchByCollab:async(token)=>sbFetch(`trips?collab_token=eq.${encodeURIComponent(token)}&select=data&limit=1`),
+  upsertByCollab:async(token,trip)=>sbFetch('trips',{method:'POST',headers:{'Prefer':'resolution=merge-duplicates,return=minimal'},body:JSON.stringify({collab_token:token,trip_id:trip.id,device_id:'collab_'+token.slice(0,8),data:trip})}),
 };
 
 /* ══ LOCAL STORAGE ══════════════════════════════════════ */
-const LS_KEY='palima_plus_v5';
+const LS_KEY='palima_plus_v6';
+/* Migrate v5 data */
+if(localStorage.getItem('palima_plus_v5')&&!localStorage.getItem('palima_plus_v6')){try{localStorage.setItem('palima_plus_v6',localStorage.getItem('palima_plus_v5'));}catch{}}
 const LS={get:()=>{try{return JSON.parse(localStorage.getItem(LS_KEY)||'{}')||{};}catch{return{};}},set:(d)=>localStorage.setItem(LS_KEY,JSON.stringify(d)),getDeviceId:()=>{let id=localStorage.getItem('palima_device_id');if(!id){id=crypto.randomUUID?crypto.randomUUID():`dev_${Date.now()}`;localStorage.setItem('palima_device_id',id);}return id;},getWeather:(dest)=>{try{const c=JSON.parse(localStorage.getItem('palima_wx_'+dest)||'null');if(!c)return null;if(Date.now()-c.ts>3600000*3)return null;return c.data;}catch{return null;}},setWeather:(dest,data)=>localStorage.setItem('palima_wx_'+dest,JSON.stringify({ts:Date.now(),data})),};
 
 /* ══ SYNC ENGINE ════════════════════════════════════════ */
@@ -1533,13 +1887,13 @@ const SettingsModal=({deviceId,trips,onImport,onClose,onPull,syncStatus})=>{
         <input ref={fileRef} type="file" accept=".json" onChange={handleImport} style={{display:'none'}}/>
       </div>
     </div>
-    <p style={{fontSize:11,color:C.t3,textAlign:'center',marginTop:14,lineHeight:1.6}}>Palima Clone Plus v5 · localStorage + Supabase · 100% gratuit</p>
+    <p style={{fontSize:11,color:C.t3,textAlign:'center',marginTop:14,lineHeight:1.6}}>Palima Clone Plus v6 · Collab · PDF · Convertisseur · 100% gratuit</p>
   </Modal>);
 };
 
 /* ══ TRIP DETAIL ════════════════════════════════════════ */
-function TripDetail({trip,onUpdate,onDelete,onBack,syncStatus}){
-  const [tab,setTab]=useState('overview');const [modal,setModal]=useState(null);const [copied,setCopied]=useState(false);const [showAdvisor,setShowAdvisor]=useState(false);
+function TripDetail({trip,onUpdate,onDelete,onBack,syncStatus,onShowCurrency,onExportPDF,deviceId,collabMode}){
+  const [tab,setTab]=useState('overview');const [modal,setModal]=useState(null);const [copied,setCopied]=useState(false);const [showAdvisor,setShowAdvisor]=useState(false);const [showCollab,setShowCollab]=useState(false);
   const add=(key,item)=>onUpdate({...trip,[key]:[...(trip[key]||[]),item]});
   const rm=(key,id)=>onUpdate({...trip,[key]:(trip[key]||[]).filter(x=>x.id!==id)});
   const fl=trip.flights||[];const ho=trip.accommodations||[];const ac=trip.activities||[];const bi=trip.budget_items||[];
@@ -1556,12 +1910,21 @@ function TripDetail({trip,onUpdate,onDelete,onBack,syncStatus}){
       <div style={{background:'linear-gradient(180deg,#0a0a14 0%,#000 100%)',padding:'20px 18px 0',position:'sticky',top:0,zIndex:50}}>
         <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:14}}>
           <button onClick={onBack} style={{background:C.glass,border:`1px solid ${C.border}`,borderRadius:12,color:C.t1,padding:'8px 14px',display:'flex',alignItems:'center',gap:6,fontSize:14,fontWeight:500}}>{I.back} Retour</button>
-          <div style={{display:'flex',gap:7,alignItems:'center'}}>
+          <div style={{display:'flex',gap:6,alignItems:'center',flexWrap:'wrap',justifyContent:'flex-end'}}>
             <SyncBadge status={syncStatus}/>
-            {db&&<button onClick={()=>setShowAdvisor(true)} style={{background:'rgba(0,122,255,.15)',border:'1px solid rgba(0,122,255,.35)',borderRadius:12,color:C.accent,padding:'8px 12px',fontSize:12,fontWeight:700,display:'flex',alignItems:'center',gap:5}}>{I.brain} Guide</button>}
-            <button onClick={()=>setModal('share')} style={{background:C.glass,border:`1px solid ${C.border}`,borderRadius:12,color:C.t2,width:36,height:36,display:'flex',alignItems:'center',justifyContent:'center'}}>{I.share}</button>
-            <button onClick={()=>setModal('edit')} style={{background:C.accent+'20',border:`1px solid ${C.accent}40`,borderRadius:12,color:C.accent,padding:'8px 12px',fontSize:13,fontWeight:600,display:'flex',alignItems:'center',gap:5}}>{I.edit}</button>
-            <button onClick={()=>{if(window.confirm(`Supprimer "${trip.title}" ?`)){onDelete(trip.id);onBack();}}} style={{background:C.red+'18',border:`1px solid ${C.red}30`,borderRadius:12,color:C.red,width:36,height:36,display:'flex',alignItems:'center',justifyContent:'center'}}>{I.trash}</button>
+            {collabMode&&<span style={{background:'rgba(48,209,88,.15)',color:'#30D158',borderRadius:8,padding:'3px 8px',fontSize:10,fontWeight:700}}>👥 Collab</span>}
+            {db&&<button onClick={()=>setShowAdvisor(true)} style={{background:'rgba(0,122,255,.15)',border:'1px solid rgba(0,122,255,.35)',borderRadius:12,color:C.accent,padding:'7px 10px',fontSize:11,fontWeight:700,display:'flex',alignItems:'center',gap:4}}>{I.brain} Guide</button>}
+            <button onClick={()=>setShowCollab(true)} style={{background:'rgba(48,209,88,.12)',border:'1px solid rgba(48,209,88,.3)',borderRadius:12,color:'#30D158',width:34,height:34,display:'flex',alignItems:'center',justifyContent:'center'}} title="Partage collaboratif">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>
+            </button>
+            <button onClick={onExportPDF} style={{background:'rgba(191,90,242,.12)',border:'1px solid rgba(191,90,242,.3)',borderRadius:12,color:C.purple,width:34,height:34,display:'flex',alignItems:'center',justifyContent:'center'}} title="Exporter PDF">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+            </button>
+            <button onClick={onShowCurrency} style={{background:'rgba(255,159,10,.12)',border:'1px solid rgba(255,159,10,.3)',borderRadius:12,color:C.orange,width:34,height:34,display:'flex',alignItems:'center',justifyContent:'center'}} title="Convertisseur">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>
+            </button>
+            <button onClick={()=>setModal('edit')} style={{background:C.accent+'20',border:`1px solid ${C.accent}40`,borderRadius:12,color:C.accent,padding:'7px 10px',fontSize:11,fontWeight:600,display:'flex',alignItems:'center',gap:4}}>{I.edit}</button>
+            <button onClick={()=>{if(window.confirm(`Supprimer "${trip.title}" ?`)){onDelete(trip.id);onBack();}}} style={{background:C.red+'18',border:`1px solid ${C.red}30`,borderRadius:12,color:C.red,width:34,height:34,display:'flex',alignItems:'center',justifyContent:'center'}}>{I.trash}</button>
           </div>
         </div>
         <div style={{marginBottom:14}}>
@@ -1673,12 +2036,13 @@ function TripDetail({trip,onUpdate,onDelete,onBack,syncStatus}){
       {modal==='edit'&&<CreateTripWizard existing={trip} onSave={upd=>onUpdate({...trip,...upd})} onClose={()=>setModal(null)}/>}
       {modal==='share'&&(<Modal onClose={()=>setModal(null)} title="Partager" icon="🔗"><button onClick={shareLink} style={{background:copied?C.green+'20':C.accent+'18',border:`1px solid ${copied?C.green:C.accent}35`,borderRadius:14,padding:'16px 20px',color:copied?C.green:C.accent,fontWeight:600,fontSize:15,display:'flex',alignItems:'center',gap:10,width:'100%',justifyContent:'center',transition:'all .2s'}}>{copied?I.check:I.copy} {copied?'Lien copié !':'Copier le lien de partage'}</button></Modal>)}
       {showAdvisor&&<SmartAdvisorModal destination={trip.destination} dates={{start:trip.start_date,end:trip.end_date}} budget={trip.total_budget} currency={trip.currency} onClose={()=>setShowAdvisor(false)} onApply={(data)=>onUpdate({...trip,advisor:data})}/>}
+      {showCollab&&<CollabModal trip={trip} onClose={()=>setShowCollab(false)} onUpdate={onUpdate} deviceId={deviceId}/>}
     </div>
   );
 }
 
 /* ══ DASHBOARD ══════════════════════════════════════════ */
-function Dashboard({trips,onCreate,onSelect,syncStatus,onSettings}){
+function Dashboard({trips,onCreate,onSelect,syncStatus,onSettings,onShowCurrency}){
   const now=new Date();
   const ongoing=trips.filter(t=>t.status==='ongoing');const upcoming=trips.filter(t=>t.status==='planning'&&t.start_date&&new Date(t.start_date)>now);const past=trips.filter(t=>t.status==='completed'||(t.end_date&&new Date(t.end_date)<now&&t.status!=='planning'));const other=trips.filter(t=>!ongoing.includes(t)&&!upcoming.includes(t)&&!past.includes(t));
   const TripCard=({trip,i})=>{
@@ -1714,8 +2078,13 @@ function Dashboard({trips,onCreate,onSelect,syncStatus,onSettings}){
         <div style={{position:'absolute',top:-60,right:-60,width:200,height:200,background:C.accent+'08',borderRadius:'50%',filter:'blur(40px)'}}/>
         <div style={{position:'absolute',bottom:-40,left:-40,width:150,height:150,background:C.purple+'08',borderRadius:'50%',filter:'blur(30px)'}}/>
         <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:8}}>
-          <div><p style={{fontSize:11,color:C.accent,fontWeight:700,letterSpacing:2.5,textTransform:'uppercase',marginBottom:4}}>Palima Clone Plus ✦ v5</p><h1 style={{fontFamily:'Syne,sans-serif',fontSize:32,fontWeight:800,lineHeight:1.1}}>Mes voyages</h1></div>
-          <button onClick={onSettings} style={{background:C.glass,border:`1px solid ${C.border}`,borderRadius:14,color:C.t2,width:42,height:42,display:'flex',alignItems:'center',justifyContent:'center',backdropFilter:'blur(10px)',flexShrink:0}}>{I.settings}</button>
+          <div><p style={{fontSize:11,color:C.accent,fontWeight:700,letterSpacing:2.5,textTransform:'uppercase',marginBottom:4}}>Palima Clone Plus ✦ v6</p><h1 style={{fontFamily:'Syne,sans-serif',fontSize:32,fontWeight:800,lineHeight:1.1}}>Mes voyages</h1></div>
+          <div style={{display:'flex',gap:8}}>
+            <button onClick={onShowCurrency} style={{background:'rgba(255,159,10,.12)',border:'1px solid rgba(255,159,10,.3)',borderRadius:14,color:C.orange,width:42,height:42,display:'flex',alignItems:'center',justifyContent:'center',backdropFilter:'blur(10px)',flexShrink:0}} title="Convertisseur de devises">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>
+            </button>
+            <button onClick={onSettings} style={{background:C.glass,border:`1px solid ${C.border}`,borderRadius:14,color:C.t2,width:42,height:42,display:'flex',alignItems:'center',justifyContent:'center',backdropFilter:'blur(10px)',flexShrink:0}}>{I.settings}</button>
+          </div>
         </div>
         <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:24}}><p style={{fontSize:14,color:C.t2}}>🧠 Conseiller IA · Quartiers · Hôtels · Budget</p><SyncBadge status={syncStatus}/></div>
         <Btn onClick={onCreate}>{I.plus} Nouveau voyage</Btn>
@@ -1731,20 +2100,137 @@ function Dashboard({trips,onCreate,onSelect,syncStatus,onSettings}){
 /* ══ APP ROOT ════════════════════════════════════════════ */
 function App(){
   const [data,setData]=useState(()=>{const d=LS.get();return{trips:d.trips||[]};});
-  const [selected,setSelected]=useState(null);const [showCreate,setShowCreate]=useState(false);const [showSettings,setShowSettings]=useState(false);const [hydrated,setHydrated]=useState(false);
+  const [selected,setSelected]=useState(null);
+  const [showCreate,setShowCreate]=useState(false);
+  const [showSettings,setShowSettings]=useState(false);
+  const [showCurrency,setShowCurrency]=useState(false);
+  const [hydrated,setHydrated]=useState(false);
+  const [showOnboarding,setShowOnboarding]=useState(false);
+  const [collabMode,setCollabMode]=useState(false); // true = editing via collab link
+  const [collabToken,setCollabToken]=useState(null);
   const {deviceId,syncStatus,debouncedSync,deleteFromCloud,pullFromCloud}=useSyncEngine();
-  const save=useCallback((d,sync=true)=>{setData(d);LS.set(d);if(sync&&d.trips)d.trips.forEach(t=>debouncedSync(t));},[debouncedSync]);
-  useEffect(()=>{const init=async()=>{const cloudTrips=await pullFromCloud();if(cloudTrips&&cloudTrips.length>0){const local=LS.get();const localTrips=local.trips||[];const merged=new Map();localTrips.forEach(t=>merged.set(t.id,t));cloudTrips.forEach(t=>merged.set(t.id,t));const newData={trips:Array.from(merged.values())};setData(newData);LS.set(newData);}setHydrated(true);};init();},[]);
-  useEffect(()=>{const p=new URLSearchParams(window.location.search);const share=p.get('share');if(share){try{const trip=decShare(share);if(window.confirm(`🌍 Voyage partagé : "${trip.title}"\n\nImporter ?`)){const nt={...trip,id:uid(),title:trip.title+' (partagé)',created_at:new Date().toISOString()};save({...data,trips:[nt,...(data.trips||[])]});}}catch{}window.history.replaceState({},'',window.location.pathname);}if(window.location.search==='?action=new')setShowCreate(true);},[]);
+
+  const save=useCallback((d,sync=true)=>{
+    setData(d);LS.set(d);
+    if(sync&&d.trips)d.trips.forEach(t=>debouncedSync(t));
+  },[debouncedSync]);
+
+  // Handle collab sync: when in collab mode, also push to collab token
+  const saveWithCollab=useCallback((d,sync=true)=>{
+    save(d,sync);
+    if(collabMode&&collabToken&&d.trips){
+      const trip=d.trips.find(t=>t.collab_token===collabToken);
+      if(trip)SB.upsertByCollab(collabToken,trip).catch(console.warn);
+    }
+  },[save,collabMode,collabToken]);
+
+  useEffect(()=>{
+    const init=async()=>{
+      // Check collab URL first
+      const p=new URLSearchParams(window.location.search);
+      const collab=p.get('collab');
+
+      if(collab){
+        try{
+          const rows=await SB.fetchByCollab(collab);
+          if(rows&&rows.length>0){
+            const trip={...rows[0].data,collab_token:collab};
+            const local=LS.get();
+            const existing=new Map((local.trips||[]).map(t=>[t.id,t]));
+            existing.set(trip.id,trip);
+            const newData={trips:Array.from(existing.values())};
+            setData(newData);LS.set(newData);
+            setCollabMode(true);setCollabToken(collab);
+            setSelected(trip);
+          }
+        }catch(e){console.warn('Collab load error',e);}
+        window.history.replaceState({},'',window.location.pathname);
+        setHydrated(true);
+        return;
+      }
+
+      // Normal init
+      const cloudTrips=await pullFromCloud();
+      if(cloudTrips&&cloudTrips.length>0){
+        const local=LS.get();const localTrips=local.trips||[];
+        const merged=new Map();localTrips.forEach(t=>merged.set(t.id,t));cloudTrips.forEach(t=>merged.set(t.id,t));
+        const newData={trips:Array.from(merged.values())};setData(newData);LS.set(newData);
+      }
+
+      // Show onboarding if first time
+      if(!localStorage.getItem('palima_onboarded')){
+        setShowOnboarding(true);
+      }
+
+      // Legacy share URL
+      const share=p.get('share');
+      if(share){try{const trip=decShare(share);if(window.confirm(`🌍 Voyage partagé : "${trip.title}"\n\nImporter ?`)){const nt={...trip,id:uid(),title:trip.title+' (partagé)',created_at:new Date().toISOString()};save({...LS.get(),trips:[nt,...(LS.get().trips||[])]});}}catch{}window.history.replaceState({},'',window.location.pathname);}
+      if(window.location.search==='?action=new')setShowCreate(true);
+
+      setHydrated(true);
+    };
+    init();
+  },[]);
+
   useEffect(()=>{if('serviceWorker' in navigator)navigator.serviceWorker.register('./sw.js').catch(()=>{});},[]);
-  const createTrip=useCallback(async(t)=>{const nt={...t,id:uid(),flights:[],accommodations:[],activities:[],budget_items:[],checklist:genChecklist(t),created_at:new Date().toISOString()};if(!nt.lat&&nt.destination){const geo=await geocode(nt.destination);if(geo){nt.lat=geo.lat;nt.lng=geo.lng;}}save({...data,trips:[nt,...data.trips]});},[data,save]);
-  const updateTrip=useCallback((updated)=>{const trips=data.trips.map(t=>t.id===updated.id?updated:t);save({...data,trips});setSelected(updated);},[data,save]);
+
+  const createTrip=useCallback(async(t)=>{
+    const nt={...t,id:uid(),flights:[],accommodations:[],activities:[],budget_items:[],checklist:genChecklist(t),created_at:new Date().toISOString()};
+    if(!nt.lat&&nt.destination){const geo=await geocode(nt.destination);if(geo){nt.lat=geo.lat;nt.lng=geo.lng;}}
+    save({...data,trips:[nt,...data.trips]});
+  },[data,save]);
+
+  const updateTrip=useCallback((updated)=>{
+    const trips=data.trips.map(t=>t.id===updated.id?updated:t);
+    const newData={...data,trips};
+    saveWithCollab(newData);
+    setSelected(updated);
+  },[data,saveWithCollab]);
+
   const deleteTrip=useCallback((id)=>{save({...data,trips:data.trips.filter(t=>t.id!==id)},false);deleteFromCloud(id);},[data,save,deleteFromCloud]);
   const importTrips=useCallback((imported)=>{const existing=new Map(data.trips.map(t=>[t.id,t]));imported.forEach(t=>existing.set(t.id,{...t,id:t.id||uid()}));save({...data,trips:Array.from(existing.values())});setShowSettings(false);},[data,save]);
   const handlePull=useCallback(async()=>{const cloudTrips=await pullFromCloud();if(cloudTrips){const merged=new Map(data.trips.map(t=>[t.id,t]));cloudTrips.forEach(t=>merged.set(t.id,t));const newData={...data,trips:Array.from(merged.values())};setData(newData);LS.set(newData);}},[data,pullFromCloud]);
-  if(!hydrated)return(<div style={{minHeight:'100vh',background:C.bg,display:'flex',alignItems:'center',justifyContent:'center',flexDirection:'column',gap:16}}><div style={{fontSize:44}}>🌍</div><p style={{fontFamily:'Syne,sans-serif',fontSize:18,fontWeight:700}}>Palima Clone Plus</p><p className="pulse" style={{fontSize:13,color:C.t3}}>Chargement...</p></div>);
+
+  if(!hydrated)return(
+    <div style={{minHeight:'100vh',background:C.bg,display:'flex',alignItems:'center',justifyContent:'center',flexDirection:'column',gap:16}}>
+      <div style={{fontSize:44}}>🌍</div>
+      <p style={{fontFamily:'Syne,sans-serif',fontSize:18,fontWeight:700}}>Palima Clone Plus</p>
+      <p className="pulse" style={{fontSize:13,color:C.t3}}>{collabMode?'Chargement du voyage partagé...':'Synchronisation...'}</p>
+    </div>
+  );
+
   const liveSelected=selected?data.trips.find(t=>t.id===selected.id)||selected:null;
-  return(<>{liveSelected?(<TripDetail trip={liveSelected} onUpdate={updateTrip} onDelete={deleteTrip} onBack={()=>setSelected(null)} syncStatus={syncStatus}/>):(<Dashboard trips={data.trips} onCreate={()=>setShowCreate(true)} onSelect={setSelected} syncStatus={syncStatus} onSettings={()=>setShowSettings(true)}/>)}{showCreate&&<CreateTripWizard onSave={createTrip} onClose={()=>setShowCreate(false)}/>}{showSettings&&<SettingsModal deviceId={deviceId} trips={data.trips} onImport={importTrips} onClose={()=>setShowSettings(false)} onPull={handlePull} syncStatus={syncStatus}/>}</>);
+
+  return(
+    <>
+      {liveSelected?(
+        <TripDetail
+          trip={liveSelected}
+          onUpdate={updateTrip}
+          onDelete={deleteTrip}
+          onBack={()=>{setSelected(null);setCollabMode(false);setCollabToken(null);}}
+          syncStatus={syncStatus}
+          onShowCurrency={()=>setShowCurrency(true)}
+          onExportPDF={()=>exportTripPDF(liveSelected)}
+          deviceId={deviceId}
+          collabMode={collabMode}
+        />
+      ):(
+        <Dashboard
+          trips={data.trips}
+          onCreate={()=>setShowCreate(true)}
+          onSelect={setSelected}
+          syncStatus={syncStatus}
+          onSettings={()=>setShowSettings(true)}
+          onShowCurrency={()=>setShowCurrency(true)}
+        />
+      )}
+      {showOnboarding&&<OnboardingModal deviceId={deviceId} onDone={()=>{localStorage.setItem('palima_onboarded','1');setShowOnboarding(false);setShowCreate(true);}}/>}
+      {showCreate&&<CreateTripWizard onSave={createTrip} onClose={()=>setShowCreate(false)}/>}
+      {showSettings&&<SettingsModal deviceId={deviceId} trips={data.trips} onImport={importTrips} onClose={()=>setShowSettings(false)} onPull={handlePull} syncStatus={syncStatus}/>}
+      {showCurrency&&<CurrencyModal onClose={()=>setShowCurrency(false)} tripCurrency={liveSelected?.currency}/>}
+    </>
+  );
 }
 ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
 </script>
