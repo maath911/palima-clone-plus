@@ -1,0 +1,1024 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
+<meta name="theme-color" content="#000000"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+<meta name="apple-mobile-web-app-title" content="Palima+"/>
+<title>Palima Clone Plus</title>
+<link rel="manifest" href="manifest.json"/>
+<link rel="apple-touch-icon" href="icons/icon-192.png"/>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@600;700;800&family=Plus+Jakarta+Sans:wght@300;400;500;600&display=swap" rel="stylesheet"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+html,body,#root{height:100%;width:100%}
+body{background:#000;color:#fff;font-family:'Plus Jakarta Sans',sans-serif;overflow-x:hidden;-webkit-font-smoothing:antialiased}
+::-webkit-scrollbar{width:3px}::-webkit-scrollbar-track{background:#0a0a0a}::-webkit-scrollbar-thumb{background:#2a2a2a;border-radius:2px}
+input,textarea,select{background:rgba(255,255,255,.06);border:1.5px solid rgba(255,255,255,.1);border-radius:12px;color:#fff;padding:12px 16px;font-family:'Plus Jakarta Sans',sans-serif;font-size:14px;outline:none;width:100%;transition:border .2s,background .2s}
+input:focus,textarea:focus,select:focus{border-color:#007AFF;background:rgba(0,122,255,.06)}
+input::placeholder,textarea::placeholder{color:rgba(255,255,255,.28)}
+select option{background:#1a1a1a;color:#fff}
+button{cursor:pointer;font-family:'Plus Jakarta Sans',sans-serif;border:none;outline:none;transition:all .15s}
+button:active{transform:scale(.97)}
+input[type=checkbox]{width:18px;height:18px;cursor:pointer;accent-color:#007AFF}
+@keyframes fadeUp{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:translateY(0)}}
+@keyframes slideFromBottom{from{opacity:0;transform:translateY(100%)}to{opacity:1;transform:translateY(0)}}
+@keyframes scaleIn{from{opacity:0;transform:scale(.94)}to{opacity:1;transform:scale(1)}}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+@keyframes slideIn{from{opacity:0;transform:translateX(-8px)}to{opacity:1;transform:translateX(0)}}
+.fade-up{animation:fadeUp .3s ease forwards}
+.slide-bottom{animation:slideFromBottom .38s cubic-bezier(.32,1,.23,1) forwards}
+.scale-in{animation:scaleIn .25s ease forwards}
+.slide-in{animation:slideIn .2s ease forwards}
+.glass{background:rgba(255,255,255,.04);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border:1px solid rgba(255,255,255,.08)}
+.spin{animation:spin .8s linear infinite}
+.pulse{animation:pulse 1.5s ease-in-out infinite}
+.leaflet-container{background:#0a0a0a !important;border-radius:16px}
+.leaflet-tile{filter:brightness(.7) saturate(.6)}
+.custom-pin{background:transparent;border:none}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const {useState,useEffect,useRef,useCallback,useMemo}=React;
+
+/* ══ SUPABASE ══════════════════════════════════════════ */
+const SB_URL='https://ntjfarocckcepwkgzrzb.supabase.co';
+const SB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im50amZhcm9jY2tjZXB3a2d6cnpiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQxODI3NjksImV4cCI6MjA4OTc1ODc2OX0.VHOnQAwthE6uWOTWyCSpNdq5ZG59sUNfamVj4WuJiFM';
+const sbFetch=async(path,opts={})=>{
+  const r=await fetch(`${SB_URL}/rest/v1/${path}`,{...opts,headers:{'apikey':SB_KEY,'Authorization':`Bearer ${SB_KEY}`,'Content-Type':'application/json','Prefer':'return=representation',...(opts.headers||{})}});
+  if(!r.ok)throw new Error(await r.text());
+  const t=await r.text();return t?JSON.parse(t):null;
+};
+const SB={
+  upsertTrip:async(did,trip)=>sbFetch('trips',{method:'POST',headers:{'Prefer':'resolution=merge-duplicates,return=minimal'},body:JSON.stringify({device_id:did,trip_id:trip.id,data:trip})}),
+  fetchTrips:async(did)=>sbFetch(`trips?device_id=eq.${encodeURIComponent(did)}&select=data,updated_at&order=updated_at.desc`),
+  deleteTrip:async(did,tid)=>sbFetch(`trips?device_id=eq.${encodeURIComponent(did)}&trip_id=eq.${encodeURIComponent(tid)}`,{method:'DELETE'}),
+};
+
+/* ══ LOCAL STORAGE ══════════════════════════════════════ */
+const LS_KEY='palima_plus_v3';
+const LS={
+  get:()=>{try{return JSON.parse(localStorage.getItem(LS_KEY)||'{}')||{};}catch{return{};}},
+  set:(d)=>localStorage.setItem(LS_KEY,JSON.stringify(d)),
+  getDeviceId:()=>{let id=localStorage.getItem('palima_device_id');if(!id){id=crypto.randomUUID?crypto.randomUUID():`dev_${Date.now()}`;localStorage.setItem('palima_device_id',id);}return id;},
+  getWeather:(dest)=>{try{const c=JSON.parse(localStorage.getItem('palima_wx_'+dest)||'null');if(!c)return null;if(Date.now()-c.ts>3600000*3)return null;return c.data;}catch{return null;}},
+  setWeather:(dest,data)=>localStorage.setItem('palima_wx_'+dest,JSON.stringify({ts:Date.now(),data})),
+};
+
+/* ══ SYNC ENGINE ════════════════════════════════════════ */
+const useSyncEngine=()=>{
+  const deviceId=useMemo(()=>LS.getDeviceId(),[]);
+  const [syncStatus,setSyncStatus]=useState('idle');
+  const pendingRef=useRef(new Set());
+  const timersRef=useRef({});
+  const syncTrip=useCallback(async(trip)=>{
+    if(!navigator.onLine){setSyncStatus('offline');return;}
+    try{setSyncStatus('syncing');await SB.upsertTrip(deviceId,trip);pendingRef.current.delete(trip.id);setSyncStatus('synced');setTimeout(()=>setSyncStatus('idle'),2500);}
+    catch{setSyncStatus('error');}
+  },[deviceId]);
+  const debouncedSync=useCallback((trip)=>{
+    pendingRef.current.add(trip.id);clearTimeout(timersRef.current[trip.id]);
+    timersRef.current[trip.id]=setTimeout(()=>syncTrip(trip),1200);
+  },[syncTrip]);
+  const deleteFromCloud=useCallback(async(tid)=>{if(navigator.onLine)try{await SB.deleteTrip(deviceId,tid);}catch{};},[deviceId]);
+  const pullFromCloud=useCallback(async()=>{
+    if(!navigator.onLine)return null;
+    try{setSyncStatus('syncing');const rows=await SB.fetchTrips(deviceId);setSyncStatus('synced');setTimeout(()=>setSyncStatus('idle'),2500);return rows?.map(r=>r.data)||[];}
+    catch{setSyncStatus('error');return null;}
+  },[deviceId]);
+  useEffect(()=>{
+    const onOnline=async()=>{const d=LS.get();(d.trips||[]).forEach(t=>{if(pendingRef.current.has(t.id))syncTrip(t);});};
+    window.addEventListener('online',onOnline);return()=>window.removeEventListener('online',onOnline);
+  },[syncTrip]);
+  return{deviceId,syncStatus,debouncedSync,deleteFromCloud,pullFromCloud};
+};
+
+/* ══ WEATHER HOOK ════════════════════════════════════════ */
+const WX_CODE={0:'☀️',1:'🌤️',2:'⛅',3:'☁️',45:'🌫️',48:'🌫️',51:'🌦️',53:'🌦️',55:'🌧️',61:'🌧️',63:'🌧️',65:'🌧️',71:'🌨️',73:'🌨️',75:'❄️',80:'🌦️',81:'🌧️',82:'⛈️',95:'⛈️',96:'⛈️',99:'⛈️'};
+const wxIcon=(c)=>WX_CODE[c]||'🌡️';
+const useWeather=(destination,lat,lng)=>{
+  const [wx,setWx]=useState(null);const [loading,setLoading]=useState(false);
+  useEffect(()=>{
+    if(!destination)return;
+    const cached=LS.getWeather(destination);if(cached){setWx(cached);return;}
+    const fetch_wx=async(la,lo)=>{
+      try{
+        const r=await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${la}&longitude=${lo}&daily=weathercode,temperature_2m_max,temperature_2m_min&timezone=auto&forecast_days=7`);
+        const d=await r.json();
+        const days=(d.daily?.time||[]).slice(0,5).map((t,i)=>({date:t,code:d.daily.weathercode[i],max:Math.round(d.daily.temperature_2m_max[i]),min:Math.round(d.daily.temperature_2m_min[i])}));
+        LS.setWeather(destination,days);setWx(days);
+      }catch{}finally{setLoading(false);}
+    };
+    if(lat&&lng){fetch_wx(lat,lng);return;}
+    setLoading(true);
+    fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(destination)}&format=json&limit=1`)
+      .then(r=>r.json()).then(d=>{if(d[0])fetch_wx(d[0].lat,d[0].lon);else setLoading(false);}).catch(()=>setLoading(false));
+  },[destination,lat,lng]);
+  return{wx,loading};
+};
+
+/* ══ GEOCODING ═══════════════════════════════════════════ */
+const geocode=async(dest)=>{
+  try{const r=await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(dest)}&format=json&limit=1`);const d=await r.json();if(d[0])return{lat:parseFloat(d[0].lat),lng:parseFloat(d[0].lon),display:d[0].display_name};return null;}catch{return null;}
+};
+
+/* ══ CHECKLIST GENERATOR ═════════════════════════════════ */
+const CHECKLIST_BASE=[
+  {id:'passport',label:'Passeport valide (+ 6 mois)',cat:'documents',icon:'🛂'},
+  {id:'ticket_print',label:'Billets d\'avion imprimés / sur téléphone',cat:'documents',icon:'✈️'},
+  {id:'hotel_confirm',label:'Confirmation d\'hôtel',cat:'documents',icon:'🏨'},
+  {id:'insurance',label:'Assurance voyage souscrite',cat:'documents',icon:'🛡️'},
+  {id:'currency',label:'Monnaie locale / carte internationale',cat:'finance',icon:'💰'},
+  {id:'phone_charge',label:'Téléphone chargé + chargeur',cat:'tech',icon:'🔋'},
+  {id:'adapter',label:'Adaptateur secteur',cat:'tech',icon:'🔌'},
+  {id:'luggage_lock',label:'Cadenas de valise',cat:'bagages',icon:'🔒'},
+  {id:'toiletries',label:'Trousse de toilette (liquides <100ml)',cat:'bagages',icon:'🧴'},
+  {id:'meds',label:'Médicaments personnels',cat:'santé',icon:'💊'},
+  {id:'sim',label:'Carte SIM locale ou eSIM',cat:'tech',icon:'📱'},
+  {id:'photos_id',label:'Photocopies des documents importants',cat:'documents',icon:'📄'},
+  {id:'emergency_numbers',label:'Numéros d\'urgence notés',cat:'sécurité',icon:'🆘'},
+  {id:'luggage_check',label:'Poids des bagages vérifié',cat:'bagages',icon:'⚖️'},
+];
+
+const genChecklist=(trip)=>{
+  const items=[...CHECKLIST_BASE];
+  const d=(trip.destination||'').toLowerCase();
+  const isLong=(trip.end_date&&trip.start_date)&&(new Date(trip.end_date)-new Date(trip.start_date))>7*86400000;
+  if(isLong)items.push({id:'extra_clothes',label:'Vêtements supplémentaires (long séjour)',cat:'bagages',icon:'👕'});
+  const tropical=['thaïlande','bali','vietnam','cambodge','bénin','sénégal','kenya','tanzanie','réunion','martinique','guadeloupe'];
+  if(tropical.some(x=>d.includes(x)))items.push({id:'repellent',label:'Répulsif anti-moustiques',cat:'santé',icon:'🦟'},{id:'sunscreen',label:'Crème solaire haute protection',cat:'santé',icon:'🌞'});
+  const cold=['islande','norvège','canada','alaska','suède','finlande'];
+  if(cold.some(x=>d.includes(x)))items.push({id:'winter_coat',label:'Manteau d\'hiver / sous-vêtements thermiques',cat:'bagages',icon:'🧥'});
+  const schengen=['espagne','italie','allemagne','portugal','grèce','pays-bas','autriche','suisse'];
+  const needVisa=!schengen.some(x=>d.includes(x))&&!d.includes('france');
+  if(needVisa)items.push({id:'visa',label:'Vérifier si visa requis',cat:'documents',icon:'📋'});
+  return items.map(i=>({...i,checked:false}));
+};
+
+/* ══ SMART SUGGESTIONS ═══════════════════════════════════ */
+const SmartSuggestions=({trip})=>{
+  const sugg=[];
+  const fl=trip.flights||[];const ho=trip.accommodations||[];const ac=trip.activities||[];
+  const now=new Date();const start=trip.start_date?new Date(trip.start_date):null;
+  const daysUntil=start?Math.ceil((start-now)/86400000):null;
+  if(fl.length===0&&trip.destination)sugg.push({id:'no_flight',icon:'✈️',text:`Aucun vol pour ${trip.destination}`,action:'Chercher sur Skyscanner',href:`https://www.skyscanner.fr/transport/vols/FR/${trip.destination_iata||encodeURIComponent(trip.destination)}/${trip.start_date?trip.start_date.replace(/-/g,''):''}`,color:'#007AFF'});
+  if(ho.length===0&&trip.destination)sugg.push({id:'no_hotel',icon:'🏨',text:`Pas d'hébergement enregistré`,action:'Voir Booking.com',href:`https://www.booking.com/searchresults.fr.html?ss=${encodeURIComponent(trip.destination)}&checkin=${trip.start_date||''}&checkout=${trip.end_date||''}`,color:'#BF5AF2'});
+  if(!trip.total_budget||trip.total_budget===0)sugg.push({id:'no_budget',icon:'💰',text:'Budget non défini',action:'Définir un budget',href:null,color:'#FF9F0A'});
+  if(daysUntil!==null&&daysUntil<=7&&daysUntil>=0&&(trip.checklist||[]).filter(c=>c.checked).length<3)sugg.push({id:'checklist',icon:'✅',text:`Départ dans ${daysUntil}j — checklist incomplète`,action:'Voir la checklist',href:null,color:'#30D158'});
+  if(sugg.length===0)return null;
+  return(
+    <div style={{marginBottom:16}}>
+      <p style={{fontSize:11,color:'rgba(255,255,255,.3)',fontWeight:700,textTransform:'uppercase',letterSpacing:1.2,marginBottom:10}}>💡 Suggestions</p>
+      <div style={{display:'flex',flexDirection:'column',gap:8}}>
+        {sugg.map(s=>(
+          <div key={s.id} className="scale-in" style={{background:s.color+'12',border:`1px solid ${s.color}30`,borderRadius:14,padding:'12px 16px',display:'flex',alignItems:'center',gap:12}}>
+            <span style={{fontSize:20,flexShrink:0}}>{s.icon}</span>
+            <div style={{flex:1,minWidth:0}}>
+              <p style={{fontSize:13,fontWeight:600,marginBottom:2}}>{s.text}</p>
+              {s.href?(
+                <a href={s.href} target="_blank" rel="noopener noreferrer" style={{fontSize:12,color:s.color,fontWeight:600,textDecoration:'none',display:'flex',alignItems:'center',gap:4}}>
+                  {s.action} <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                </a>
+              ):<p style={{fontSize:12,color:s.color,fontWeight:600}}>{s.action}</p>}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+/* ══ WEATHER WIDGET ══════════════════════════════════════ */
+const WeatherWidget=({trip})=>{
+  const {wx,loading}=useWeather(trip.destination,trip.lat,trip.lng);
+  const startDate=trip.start_date;
+  if(loading)return(<div className="glass" style={{borderRadius:16,padding:'14px 18px',marginBottom:16}}><p className="pulse" style={{fontSize:13,color:'rgba(255,255,255,.3)'}}>☁️ Chargement météo...</p></div>);
+  if(!wx||wx.length===0)return null;
+  const relevant=startDate?wx.filter(d=>d.date>=startDate).slice(0,5):wx.slice(0,5);
+  if(relevant.length===0)return null;
+  return(
+    <div className="glass" style={{borderRadius:16,padding:'14px 18px',marginBottom:16}}>
+      <p style={{fontSize:11,color:'rgba(255,255,255,.3)',fontWeight:700,textTransform:'uppercase',letterSpacing:1.2,marginBottom:12}}>🌤️ Météo prévue — {trip.destination}</p>
+      <div style={{display:'flex',gap:6,overflowX:'auto',scrollbarWidth:'none',paddingBottom:4}}>
+        {relevant.map(d=>{
+          const dt=new Date(d.date+'T00:00:00');
+          const label=dt.toLocaleDateString('fr-FR',{weekday:'short',day:'numeric'});
+          return(
+            <div key={d.date} style={{flex:'0 0 auto',textAlign:'center',background:'rgba(255,255,255,.04)',borderRadius:12,padding:'10px 12px',minWidth:62}}>
+              <p style={{fontSize:10,color:'rgba(255,255,255,.4)',marginBottom:6,whiteSpace:'nowrap'}}>{label}</p>
+              <p style={{fontSize:22,marginBottom:6}}>{wxIcon(d.code)}</p>
+              <p style={{fontSize:12,fontWeight:700,color:'#fff'}}>{d.max}°</p>
+              <p style={{fontSize:11,color:'rgba(255,255,255,.4)'}}>{d.min}°</p>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
+/* ══ MAP VIEW ════════════════════════════════════════════ */
+const MapView=({trip})=>{
+  const mapRef=useRef(null);
+  const mapInstanceRef=useRef(null);
+  const ho=trip.accommodations||[];
+  const ac=trip.activities||[];
+
+  useEffect(()=>{
+    if(!mapRef.current||mapInstanceRef.current)return;
+    const initMap=async()=>{
+      let centerLat=trip.lat;let centerLng=trip.lng;
+      if(!centerLat&&trip.destination){
+        const geo=await geocode(trip.destination);
+        if(geo){centerLat=geo.lat;centerLng=geo.lng;}
+      }
+      if(!centerLat)return;
+      const map=L.map(mapRef.current,{zoomControl:true,scrollWheelZoom:false}).setView([centerLat,centerLng],12);
+      mapInstanceRef.current=map;
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'© OpenStreetMap',maxZoom:19}).addTo(map);
+      const makePin=(emoji,color)=>L.divIcon({html:`<div style="width:36px;height:36px;background:${color};border-radius:50% 50% 50% 0;transform:rotate(-45deg);display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,.6);border:2px solid rgba(255,255,255,.3)"><span style="transform:rotate(45deg);font-size:16px">${emoji}</span></div>`,iconSize:[36,36],iconAnchor:[18,36],className:'custom-pin'});
+      ho.forEach(h=>{
+        if(h.latitude&&h.longitude)L.marker([h.latitude,h.longitude],{icon:makePin('🏨','#BF5AF2')}).addTo(map).bindPopup(`<b>${h.name}</b><br/>${h.type}`);
+      });
+      ac.forEach(a=>{
+        if(a.latitude&&a.longitude)L.marker([a.latitude,a.longitude],{icon:makePin(CAT_I[a.category]||'📌','#30D158')}).addTo(map).bindPopup(`<b>${a.title}</b><br/>${a.date||''}`);
+      });
+    };
+    initMap();
+    return()=>{if(mapInstanceRef.current){mapInstanceRef.current.remove();mapInstanceRef.current=null;}};
+  },[trip.destination,trip.lat,trip.lng]);
+
+  const hasLocations=ho.some(h=>h.latitude)||ac.some(a=>a.latitude);
+
+  return(
+    <div className="fade-up">
+      <div style={{height:320,borderRadius:16,overflow:'hidden',marginBottom:14}} ref={mapRef}/>
+      {!hasLocations&&(
+        <div className="glass" style={{borderRadius:14,padding:'14px 18px'}}>
+          <p style={{fontSize:13,color:'rgba(255,255,255,.4)',textAlign:'center',lineHeight:1.6}}>
+            📍 Les pins apparaîtront quand tu ajouteras des coordonnées à tes hébergements et activités.
+          </p>
+        </div>
+      )}
+      {(ho.length>0||ac.length>0)&&(
+        <div style={{display:'flex',flexWrap:'wrap',gap:8,marginTop:10}}>
+          {ho.map(h=>(<div key={h.id} style={{background:'#BF5AF222',border:'1px solid #BF5AF240',borderRadius:10,padding:'6px 12px',fontSize:12,color:'#BF5AF2',display:'flex',alignItems:'center',gap:6}}><span>🏨</span>{h.name}</div>))}
+          {ac.slice(0,4).map(a=>(<div key={a.id} style={{background:'#30D15822',border:'1px solid #30D15840',borderRadius:10,padding:'6px 12px',fontSize:12,color:'#30D158',display:'flex',alignItems:'center',gap:6}}><span>{CAT_I[a.category]||'📌'}</span>{a.title}</div>))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+/* ══ CHECKLIST TAB ═══════════════════════════════════════ */
+const ChecklistTab=({trip,onUpdate})=>{
+  const checklist=trip.checklist||genChecklist(trip);
+  const toggle=(id)=>{
+    const updated=checklist.map(i=>i.id===id?{...i,checked:!i.checked}:i);
+    onUpdate({...trip,checklist:updated});
+  };
+  const done=checklist.filter(c=>c.checked).length;
+  const pct=checklist.length>0?Math.round((done/checklist.length)*100):0;
+  const cats=[...new Set(checklist.map(c=>c.cat))];
+  return(
+    <div className="fade-up">
+      <div className="glass" style={{borderRadius:16,padding:'16px 20px',marginBottom:16}}>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10}}>
+          <div><p style={{fontFamily:'Syne,sans-serif',fontSize:22,fontWeight:800}}>{done}/{checklist.length}</p><p style={{fontSize:12,color:'rgba(255,255,255,.4)',marginTop:2}}>items complétés</p></div>
+          <div style={{textAlign:'right'}}><p style={{fontFamily:'Syne,sans-serif',fontSize:26,fontWeight:800,color:pct===100?'#30D158':pct>60?'#FF9F0A':'#007AFF'}}>{pct}%</p><p style={{fontSize:12,color:'rgba(255,255,255,.4)',marginTop:2}}>{pct===100?'✅ Prêt à partir !':'Complète la liste'}</p></div>
+        </div>
+        <div style={{background:'rgba(255,255,255,.08)',borderRadius:8,height:10,overflow:'hidden'}}>
+          <div style={{width:pct+'%',height:'100%',background:pct===100?'#30D158':pct>60?'#FF9F0A':'#007AFF',borderRadius:8,transition:'width .5s ease'}}/>
+        </div>
+      </div>
+      {cats.map(cat=>(
+        <div key={cat} style={{marginBottom:14}}>
+          <p style={{fontSize:11,color:'rgba(255,255,255,.3)',fontWeight:700,textTransform:'uppercase',letterSpacing:1,marginBottom:8}}>{cat}</p>
+          <div style={{display:'flex',flexDirection:'column',gap:6}}>
+            {checklist.filter(c=>c.cat===cat).map(item=>(
+              <button key={item.id} onClick={()=>toggle(item.id)} style={{background:item.checked?'rgba(48,209,88,.1)':'rgba(255,255,255,.04)',border:`1px solid ${item.checked?'rgba(48,209,88,.3)':'rgba(255,255,255,.08)'}`,borderRadius:14,padding:'13px 16px',display:'flex',alignItems:'center',gap:12,textAlign:'left',transition:'all .18s'}}>
+                <span style={{fontSize:20,flexShrink:0}}>{item.icon}</span>
+                <span style={{flex:1,fontSize:14,color:item.checked?'rgba(255,255,255,.5)':'#fff',textDecoration:item.checked?'line-through':'none',transition:'all .18s'}}>{item.label}</span>
+                <div style={{width:22,height:22,borderRadius:6,background:item.checked?'#30D158':'rgba(255,255,255,.08)',border:`1.5px solid ${item.checked?'#30D158':'rgba(255,255,255,.2)'}`,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,transition:'all .18s'}}>
+                  {item.checked&&<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3" strokeLinecap="round"><polyline points="20 6 9 17 4 12"/></svg>}
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+};
+
+/* ══ UTILS ═══════════════════════════════════════════════ */
+const uid=()=>crypto.randomUUID?crypto.randomUUID():Math.random().toString(36).slice(2)+Date.now().toString(36);
+const fd=(d)=>d?new Date(d+'T00:00:00').toLocaleDateString('fr-FR',{day:'2-digit',month:'short',year:'numeric'}):'—';
+const fc=(n,c='EUR')=>n!=null&&n!==''?new Intl.NumberFormat('fr-FR',{style:'currency',currency:c||'EUR',maximumFractionDigits:0}).format(+n||0):'—';
+const nights=(a,b)=>a&&b?Math.max(1,Math.ceil((new Date(b)-new Date(a))/86400000)):0;
+const daysCount=(a,b)=>a&&b?Math.max(1,Math.ceil((new Date(b)-new Date(a))/86400000)):0;
+const encShare=(t)=>btoa(encodeURIComponent(JSON.stringify(t)));
+const decShare=(s)=>JSON.parse(decodeURIComponent(atob(s)));
+const CAT_I={sightseeing:'🏛️',restaurant:'🍽️',transport:'🚇',sport:'⚽',culture:'🎨',shopping:'🛍️',nightlife:'🌙',beach:'🏖️',nature:'🌿',other:'📌'};
+
+/* ══ DEEP LINKS ══════════════════════════════════════════ */
+const DL={
+  skyscanner:(d,date)=>`https://www.skyscanner.fr/transport/vols/FR/${d||'anywhere'}/${date?date.replace(/-/g,''):''}`,
+  googleFlights:(d,date)=>`https://www.google.com/travel/flights?q=vols+Paris+to+${encodeURIComponent(d||'')}${date?`&date=${date}`:''}`,
+  booking:(dest,cin,cout)=>`https://www.booking.com/searchresults.fr.html?ss=${encodeURIComponent(dest||'')}&checkin=${cin||''}&checkout=${cout||''}&group_adults=2`,
+  airbnb:(dest,cin,cout)=>`https://www.airbnb.fr/s/${encodeURIComponent(dest||'')}/homes?checkin=${cin||''}&checkout=${cout||''}&adults=2`,
+  gyg:(dest,date)=>`https://www.getyourguide.fr/s/?q=${encodeURIComponent(dest||'')}${date?`&date_from=${date}`:''}`,
+  viator:(dest,date)=>`https://www.viator.com/fr-FR/search?text=${encodeURIComponent(dest||'')}${date?`&startDate=${date}`:''}`,
+};
+
+/* ══ THEME + CONSTANTS ═══════════════════════════════════ */
+const C={bg:'#000',s1:'#080808',s2:'#111',s3:'#1a1a1a',s4:'#222',accent:'#007AFF',green:'#30D158',orange:'#FF9F0A',red:'#FF453A',purple:'#BF5AF2',teal:'#5AC8FA',t1:'#fff',t2:'rgba(255,255,255,.5)',t3:'rgba(255,255,255,.25)',t4:'rgba(255,255,255,.10)',border:'rgba(255,255,255,.08)',glass:'rgba(255,255,255,.04)'};
+const EMOJIS=['✈️','🗺️','🏝️','🗼','🏔️','🌍','🏖️','🎡','🌺','🏯','🗽','🎭','🌊','🏕️','🎪','🚂','⛵','🏜️','🌋','🏛️'];
+const CURRENCIES=['EUR','USD','GBP','JPY','CAD','AUD','CHF','MAD','TND','MXN','SGD','THB','AED'];
+const STATUS_C={planning:C.accent,ongoing:C.green,completed:C.t3};
+const STATUS_L={planning:'Planification',ongoing:'En cours',completed:'Terminé'};
+const BUDGET_CATS=['flight','accommodation','activity','food','transport','shopping','emergency','other'];
+
+/* ══ ICONS ═══════════════════════════════════════════════ */
+const Ico=({d,w=16,h=16})=>(<svg width={w} height={h} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d={d}/></svg>);
+const I={
+  plus:(<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>),
+  back:(<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>),
+  x:(<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>),
+  check:(<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round"><polyline points="20 6 9 17 4 12"/></svg>),
+  trash:(<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a1 1 0 011-1h4a1 1 0 011 1v2"/></svg>),
+  share:(<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>),
+  edit:(<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>),
+  link:(<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>),
+  dl:(<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>),
+  copy:(<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>),
+  cloud:(<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 10h-1.26A8 8 0 109 20h9a5 5 0 000-10z"/></svg>),
+  settings:(<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>),
+  upload:(<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>),
+  map:(<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"/><line x1="8" y1="2" x2="8" y2="18"/><line x1="16" y1="6" x2="16" y2="22"/></svg>),
+};
+
+/* ══ PRIMITIVES ══════════════════════════════════════════ */
+const Btn=({children,onClick,color=C.accent,outline=false,sm=false,full=false,danger=false,loading=false,style:sx})=>{
+  const bg=danger?C.red:color;
+  return(<button onClick={onClick} disabled={loading} style={{background:outline?'transparent':bg,border:`1.5px solid ${outline?bg:'transparent'}`,color:outline?bg:'#fff',borderRadius:13,padding:sm?'8px 16px':'13px 22px',fontWeight:600,fontSize:sm?13:15,display:'flex',alignItems:'center',justifyContent:'center',gap:7,whiteSpace:'nowrap',width:full?'100%':'auto',opacity:loading?.7:1,...sx}}>
+    {loading?<span className="spin" style={{display:'inline-block',width:14,height:14,border:`2px solid currentColor`,borderTopColor:'transparent',borderRadius:'50%'}}/>:children}
+  </button>);
+};
+const Tag=({children,color=C.accent,sm})=>(<span style={{background:color+'22',color,borderRadius:8,padding:sm?'2px 8px':'4px 11px',fontSize:sm?11:12,fontWeight:700,display:'inline-flex',alignItems:'center',gap:4}}>{children}</span>);
+const Field=({label,children,half})=>(<div style={{marginBottom:13,flex:half?1:'unset'}}><label style={{display:'block',fontSize:12,color:C.t2,marginBottom:6,fontWeight:500}}>{label}</label>{children}</div>);
+const Row=({children,gap=10})=>(<div style={{display:'flex',gap,alignItems:'flex-start'}}>{children}</div>);
+const Divider=()=>(<div style={{height:1,background:C.border,margin:'18px 0'}}/>);
+
+const SyncBadge=({status})=>{
+  const cfg={idle:{c:C.t3,l:''},syncing:{c:C.orange,l:'Sync...'},synced:{c:C.green,l:'✓ Sauvegardé'},error:{c:C.red,l:'⚠ Erreur'},offline:{c:C.orange,l:'Hors ligne'}};
+  const s=cfg[status]||cfg.idle;if(!s.l)return null;
+  return(<span style={{fontSize:11,color:s.c,fontWeight:600,display:'flex',alignItems:'center',gap:4}}>{status==='syncing'&&<span className="spin" style={{display:'inline-block',width:10,height:10,border:`1.5px solid ${s.c}`,borderTopColor:'transparent',borderRadius:'50%'}}/>}{s.l}</span>);
+};
+
+const Modal=({onClose,children,title,icon})=>(
+  <div onClick={onClose} style={{position:'fixed',inset:0,background:'rgba(0,0,0,.8)',backdropFilter:'blur(12px)',WebkitBackdropFilter:'blur(12px)',zIndex:200,display:'flex',alignItems:'flex-end',justifyContent:'center'}}>
+    <div onClick={e=>e.stopPropagation()} className="slide-bottom" style={{background:C.s2,borderRadius:'24px 24px 0 0',width:'100%',maxWidth:520,maxHeight:'92vh',overflowY:'auto',padding:'24px 22px 56px'}}>
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:20}}>
+        <h2 style={{fontFamily:'Syne,sans-serif',fontSize:20,fontWeight:700,display:'flex',alignItems:'center',gap:8}}>{icon&&<span style={{fontSize:22}}>{icon}</span>}{title}</h2>
+        <button onClick={onClose} style={{background:C.s3,borderRadius:10,color:C.t2,width:32,height:32,display:'flex',alignItems:'center',justifyContent:'center'}}>{I.x}</button>
+      </div>
+      {children}
+    </div>
+  </div>
+);
+
+/* ══ DEEP LINK COMPONENTS ════════════════════════════════ */
+const DLLink=({emoji,label,href,color})=>(
+  <a href={href} target="_blank" rel="noopener noreferrer" style={{flex:1,minWidth:140,display:'flex',alignItems:'center',gap:8,background:color+'18',border:`1px solid ${color}35`,borderRadius:12,padding:'10px 14px',color,fontSize:13,fontWeight:600,textDecoration:'none'}}>
+    <span style={{fontSize:17}}>{emoji}</span><span style={{flex:1}}>{label}</span><span style={{opacity:.6,display:'flex'}}>{I.link}</span>
+  </a>
+);
+const FlightLinks=({trip})=>(<div style={{background:C.accent+'0d',border:`1px solid ${C.accent}22`,borderRadius:16,padding:'14px 16px'}}><p style={{fontSize:11,color:C.accent,fontWeight:700,textTransform:'uppercase',letterSpacing:1.2,marginBottom:10}}>🔍 Trouver des vols</p><div style={{display:'flex',flexWrap:'wrap',gap:8}}><DLLink emoji="🔵" label="Skyscanner" href={DL.skyscanner(trip?.destination_iata||trip?.destination,trip?.start_date)} color="#0770e3"/><DLLink emoji="🔴" label="Google Flights" href={DL.googleFlights(trip?.destination,trip?.start_date)} color="#ea4335"/></div></div>);
+const HotelLinks=({trip})=>(<div style={{background:C.purple+'0d',border:`1px solid ${C.purple}22`,borderRadius:16,padding:'14px 16px'}}><p style={{fontSize:11,color:C.purple,fontWeight:700,textTransform:'uppercase',letterSpacing:1.2,marginBottom:10}}>🔍 Hébergements</p><div style={{display:'flex',flexWrap:'wrap',gap:8}}><DLLink emoji="🔷" label="Booking.com" href={DL.booking(trip?.destination,trip?.start_date,trip?.end_date)} color="#003580"/><DLLink emoji="🔴" label="Airbnb" href={DL.airbnb(trip?.destination,trip?.start_date,trip?.end_date)} color="#ff5a5f"/></div></div>);
+const ActivityLinks=({trip,date})=>(<div style={{background:C.green+'0d',border:`1px solid ${C.green}22`,borderRadius:16,padding:'14px 16px'}}><p style={{fontSize:11,color:C.green,fontWeight:700,textTransform:'uppercase',letterSpacing:1.2,marginBottom:10}}>🔍 Activités</p><div style={{display:'flex',flexWrap:'wrap',gap:8}}><DLLink emoji="🟢" label="GetYourGuide" href={DL.gyg(trip?.destination,date||trip?.start_date)} color="#00b67a"/><DLLink emoji="🟠" label="Viator" href={DL.viator(trip?.destination,date||trip?.start_date)} color="#ee6422"/></div></div>);
+
+/* ══ WIZARD ══════════════════════════════════════════════ */
+const WIZARD_STEPS=[
+  {id:'destination',title:'Où vas-tu ?',icon:'📍',desc:'Destination et dates du voyage'},
+  {id:'budget',title:'Budget',icon:'💰',desc:'Définir ton enveloppe (optionnel)'},
+  {id:'style',title:'Personnalise',icon:'🎨',desc:'Emoji, notes, statut'},
+  {id:'recap',title:'Récapitulatif',icon:'🚀',desc:'Tout est bon ?'},
+];
+
+const CreateTripWizard=({onSave,onClose,existing})=>{
+  const [step,setStep]=useState(0);
+  const [t,setT]=useState(existing||{title:'',destination:'',destination_iata:'',start_date:'',end_date:'',total_budget:'',currency:'EUR',status:'planning',cover_emoji:'✈️',notes:''});
+  const [geocoding,setGeocoding]=useState(false);
+  const s=(k,v)=>setT(p=>({...p,[k]:v}));
+
+  const handleDestinationBlur=async()=>{
+    if(!t.destination||t.lat)return;
+    setGeocoding(true);
+    const geo=await geocode(t.destination);
+    if(geo){setT(p=>({...p,lat:geo.lat,lng:geo.lng}));}
+    setGeocoding(false);
+  };
+
+  const canProceed=()=>{
+    if(step===0)return t.title.length>0&&t.destination.length>0&&t.start_date.length>0;
+    return true;
+  };
+
+  const save=()=>{if(!t.title||!t.destination||!t.start_date){alert('Titre, destination et date requis');return;}onSave({...t,total_budget:+t.total_budget||0});onClose();};
+
+  const dur=t.start_date&&t.end_date?daysCount(t.start_date,t.end_date):0;
+
+  return(
+    <div onClick={onClose} style={{position:'fixed',inset:0,background:'rgba(0,0,0,.85)',backdropFilter:'blur(12px)',WebkitBackdropFilter:'blur(12px)',zIndex:200,display:'flex',alignItems:'flex-end',justifyContent:'center'}}>
+      <div onClick={e=>e.stopPropagation()} className="slide-bottom" style={{background:C.s2,borderRadius:'24px 24px 0 0',width:'100%',maxWidth:520,maxHeight:'92vh',overflowY:'auto',padding:'24px 22px 56px'}}>
+        {/* Progress */}
+        <div style={{display:'flex',gap:4,marginBottom:24}}>
+          {WIZARD_STEPS.map((ws,i)=>(
+            <div key={ws.id} style={{flex:1,height:4,borderRadius:4,background:i<=step?C.accent:'rgba(255,255,255,.1)',transition:'background .3s'}}/>
+          ))}
+        </div>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:20}}>
+          <div>
+            <p style={{fontSize:11,color:C.accent,fontWeight:700,textTransform:'uppercase',letterSpacing:1.5,marginBottom:4}}>Étape {step+1}/{WIZARD_STEPS.length}</p>
+            <h2 style={{fontFamily:'Syne,sans-serif',fontSize:22,fontWeight:800}}>{WIZARD_STEPS[step].icon} {WIZARD_STEPS[step].title}</h2>
+            <p style={{fontSize:13,color:C.t2,marginTop:3}}>{WIZARD_STEPS[step].desc}</p>
+          </div>
+          <button onClick={onClose} style={{background:C.s3,borderRadius:10,color:C.t2,width:32,height:32,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>{I.x}</button>
+        </div>
+
+        {/* Step 0 — Destination */}
+        {step===0&&(
+          <div className="slide-in">
+            <Field label="Titre du voyage *"><input value={t.title} onChange={e=>s('title',e.target.value)} placeholder="Mon aventure à Tokyo..."/></Field>
+            <Field label="Destination *">
+              <div style={{position:'relative'}}>
+                <input value={t.destination} onChange={e=>s('destination',e.target.value)} onBlur={handleDestinationBlur} placeholder="Tokyo, Japon"/>
+                {geocoding&&<span className="spin" style={{position:'absolute',right:14,top:'50%',transform:'translateY(-50%)',display:'inline-block',width:14,height:14,border:`2px solid ${C.accent}`,borderTopColor:'transparent',borderRadius:'50%'}}/>}
+                {t.lat&&!geocoding&&<span style={{position:'absolute',right:14,top:'50%',transform:'translateY(-50%)',fontSize:12,color:C.green}}>📍</span>}
+              </div>
+            </Field>
+            <Field label="Code IATA aéroport (optionnel)"><input value={t.destination_iata} onChange={e=>s('destination_iata',e.target.value.toUpperCase())} maxLength={3} placeholder="TYO"/></Field>
+            <Row>
+              <Field label="Date de départ *" half><input type="date" value={t.start_date} onChange={e=>s('start_date',e.target.value)}/></Field>
+              <Field label="Date de retour" half><input type="date" value={t.end_date} onChange={e=>s('end_date',e.target.value)}/></Field>
+            </Row>
+            {dur>0&&<div style={{background:C.accent+'15',border:`1px solid ${C.accent}30`,borderRadius:12,padding:'10px 14px',marginBottom:8}}><p style={{fontSize:13,color:C.accent,fontWeight:600}}>✈️ Voyage de {dur} jour{dur>1?'s':''}</p></div>}
+          </div>
+        )}
+
+        {/* Step 1 — Budget */}
+        {step===1&&(
+          <div className="slide-in">
+            <div style={{background:C.glass,border:`1px solid ${C.border}`,borderRadius:16,padding:'16px 18px',marginBottom:16}}>
+              <p style={{fontSize:13,color:C.t2,lineHeight:1.6,marginBottom:8}}>💡 Définir un budget te permettra de suivre tes dépenses et recevoir une alerte si tu dépasses.</p>
+              <p style={{fontSize:12,color:C.t3}}>Tu peux passer cette étape et définir le budget plus tard.</p>
+            </div>
+            <Row>
+              <Field label="Budget total" half><input type="number" value={t.total_budget} onChange={e=>s('total_budget',e.target.value)} placeholder="2000"/></Field>
+              <Field label="Devise" half><select value={t.currency} onChange={e=>s('currency',e.target.value)}>{CURRENCIES.map(c=><option key={c} value={c}>{c}</option>)}</select></Field>
+            </Row>
+            <Field label="Statut du voyage"><select value={t.status} onChange={e=>s('status',e.target.value)}><option value="planning">🔵 En préparation</option><option value="ongoing">🟢 En cours</option><option value="completed">⚪ Terminé</option></select></Field>
+          </div>
+        )}
+
+        {/* Step 2 — Style */}
+        {step===2&&(
+          <div className="slide-in">
+            <div style={{marginBottom:16}}>
+              <label style={{fontSize:12,color:C.t2,marginBottom:8,display:'block',fontWeight:500}}>Emoji du voyage</label>
+              <div style={{display:'flex',flexWrap:'wrap',gap:6}}>
+                {EMOJIS.map(e=>(<button key={e} onClick={()=>s('cover_emoji',e)} style={{fontSize:22,background:t.cover_emoji===e?C.accent+'30':'rgba(255,255,255,.05)',border:`2px solid ${t.cover_emoji===e?C.accent:C.border}`,borderRadius:10,padding:'6px 9px',transition:'all .15s'}}>{e}</button>))}
+              </div>
+            </div>
+            <Field label="Notes personnelles"><textarea value={t.notes} onChange={e=>s('notes',e.target.value)} placeholder="Idées, rappels, infos pratiques..." rows={4} style={{resize:'none'}}/></Field>
+          </div>
+        )}
+
+        {/* Step 3 — Recap */}
+        {step===3&&(
+          <div className="slide-in">
+            <div style={{background:C.glass,border:`1px solid ${C.border}`,borderRadius:20,padding:'20px',marginBottom:16}}>
+              <div style={{display:'flex',alignItems:'center',gap:16,marginBottom:16}}>
+                <div style={{fontSize:44,background:C.s3,borderRadius:16,padding:'10px 14px'}}>{t.cover_emoji}</div>
+                <div><h3 style={{fontFamily:'Syne,sans-serif',fontSize:20,fontWeight:800}}>{t.title}</h3><p style={{color:C.t2,fontSize:14,marginTop:4}}>📍 {t.destination}</p></div>
+              </div>
+              <Divider/>
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
+                {[{l:'Départ',v:fd(t.start_date)},{l:'Retour',v:fd(t.end_date)||'Non défini'},{l:'Durée',v:dur>0?`${dur} jours`:'—'},{l:'Budget',v:t.total_budget?fc(t.total_budget,t.currency):'Non défini'}].map(x=>(
+                  <div key={x.l}><p style={{fontSize:11,color:C.t3,marginBottom:3}}>{x.l}</p><p style={{fontSize:14,fontWeight:600}}>{x.v}</p></div>
+                ))}
+              </div>
+            </div>
+            <div style={{background:C.green+'12',border:`1px solid ${C.green}30`,borderRadius:14,padding:'12px 16px',marginBottom:16}}>
+              <p style={{fontSize:13,color:C.green,fontWeight:600}}>✅ Une checklist pré-départ sera générée automatiquement !</p>
+            </div>
+          </div>
+        )}
+
+        {/* Navigation */}
+        <div style={{display:'flex',gap:10,marginTop:20}}>
+          {step>0?<Btn outline onClick={()=>setStep(s=>s-1)} style={{flex:1}}>{I.back} Retour</Btn>:<button onClick={onClose} style={{flex:1,background:'transparent',border:`1.5px solid ${C.border}`,color:C.t2,borderRadius:13,padding:'13px 22px',fontWeight:600,fontSize:15}}>Annuler</button>}
+          {step<WIZARD_STEPS.length-1?(
+            <button onClick={()=>setStep(s=>s+1)} disabled={step===0&&!canProceed()} style={{flex:2,background:C.accent,border:'none',color:'#fff',borderRadius:13,padding:'13px 22px',fontWeight:700,fontSize:15,opacity:step===0&&!canProceed()?0.4:1,display:'flex',alignItems:'center',justifyContent:'center',gap:8}}>
+              Suivant
+              {step===0&&!canProceed()&&<span style={{fontSize:11,opacity:.7}}>(titre+dest+date)</span>}
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+            </button>
+          ):(
+            <Btn style={{flex:2}} onClick={save}>🚀 Créer le voyage</Btn>
+          )}
+        </div>
+        {step>0&&step<WIZARD_STEPS.length-1&&(<button onClick={()=>setStep(WIZARD_STEPS.length-1)} style={{background:'none',color:C.t3,fontSize:12,padding:'10px',marginTop:8,width:'100%'}}>Passer toutes les étapes →</button>)}
+      </div>
+    </div>
+  );
+};
+
+/* ══ FORMS (FLIGHT / HOTEL / ACTIVITY / BUDGET) ══════════ */
+const FlightForm=({trip,onAdd,onClose})=>{
+  const [f,setF]=useState({type:'outbound',airline:'',flight_number:'',origin_iata:'',destination_iata:trip?.destination_iata||'',departure_datetime:(trip?.start_date||'')+'T08:00',arrival_datetime:(trip?.start_date||'')+'T12:00',price:'',cabin_class:'economy',booking_ref:'',baggage:false});
+  const s=(k,v)=>setF(p=>({...p,[k]:v}));
+  const save=()=>{if(!f.origin_iata||!f.destination_iata){alert('Codes IATA requis');return;}onAdd({...f,id:uid(),price:+f.price||0});onClose();};
+  return(
+    <Modal onClose={onClose} title="Ajouter un vol" icon="✈️">
+      <FlightLinks trip={trip}/><Divider/>
+      <p style={{fontSize:12,color:C.t2,marginBottom:14,fontStyle:'italic'}}>✍️ Remplis après réservation :</p>
+      <Field label="Type"><select value={f.type} onChange={e=>s('type',e.target.value)}><option value="outbound">Aller ✈️</option><option value="return">Retour 🔄</option><option value="layover">Escale 🔀</option></select></Field>
+      <Row><Field label="Départ (IATA)" half><input value={f.origin_iata} onChange={e=>s('origin_iata',e.target.value.toUpperCase())} maxLength={3} placeholder="CDG"/></Field><Field label="Arrivée (IATA)" half><input value={f.destination_iata} onChange={e=>s('destination_iata',e.target.value.toUpperCase())} maxLength={3} placeholder="JFK"/></Field></Row>
+      <Row><Field label="Départ" half><input type="datetime-local" value={f.departure_datetime} onChange={e=>s('departure_datetime',e.target.value)}/></Field><Field label="Arrivée" half><input type="datetime-local" value={f.arrival_datetime} onChange={e=>s('arrival_datetime',e.target.value)}/></Field></Row>
+      <Row><Field label="Compagnie" half><input value={f.airline} onChange={e=>s('airline',e.target.value)} placeholder="Air France"/></Field><Field label="N° vol" half><input value={f.flight_number} onChange={e=>s('flight_number',e.target.value)} placeholder="AF123"/></Field></Row>
+      <Row><Field label="Prix (€)" half><input type="number" value={f.price} onChange={e=>s('price',e.target.value)} placeholder="0"/></Field><Field label="Classe" half><select value={f.cabin_class} onChange={e=>s('cabin_class',e.target.value)}><option value="economy">Économique</option><option value="premium_economy">Éco Premium</option><option value="business">Business</option><option value="first">Première</option></select></Field></Row>
+      <Field label="Référence"><input value={f.booking_ref} onChange={e=>s('booking_ref',e.target.value)} placeholder="ABC123"/></Field>
+      <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:18}}><input type="checkbox" id="fb" checked={f.baggage} onChange={e=>s('baggage',e.target.checked)}/><label htmlFor="fb" style={{fontSize:14,cursor:'pointer'}}>🧳 Bagage en soute inclus</label></div>
+      <Btn full onClick={save}>{I.check} Enregistrer le vol</Btn>
+    </Modal>
+  );
+};
+
+const HotelForm=({trip,onAdd,onClose})=>{
+  const [h,setH]=useState({name:'',type:'hotel',address:'',check_in:trip?.start_date||'',check_out:trip?.end_date||'',price_per_night:'',total_price:'',booking_ref:'',stars:3,latitude:'',longitude:''});
+  const s=(k,v)=>setH(p=>({...p,[k]:v}));
+  const n=nights(h.check_in,h.check_out)||1;
+  const calcTotal=(ppn)=>setH(p=>({...p,price_per_night:ppn,total_price:ppn?String(Math.round(+ppn*n)):''}));
+  const handleAddressBlur=async()=>{if(!h.address||h.latitude)return;const geo=await geocode(h.address);if(geo)setH(p=>({...p,latitude:geo.lat,longitude:geo.lng}));};
+  const save=()=>{if(!h.name){alert('Nom requis');return;}onAdd({...h,id:uid(),stars:+h.stars,price_per_night:+h.price_per_night||0,total_price:+h.total_price||0,latitude:h.latitude?+h.latitude:null,longitude:h.longitude?+h.longitude:null});onClose();};
+  return(
+    <Modal onClose={onClose} title="Hébergement" icon="🏨">
+      <HotelLinks trip={trip}/><Divider/>
+      <Field label="Nom"><input value={h.name} onChange={e=>s('name',e.target.value)} placeholder="Hôtel Le Grand Paris..."/></Field>
+      <Row><Field label="Type" half><select value={h.type} onChange={e=>s('type',e.target.value)}><option value="hotel">🏨 Hôtel</option><option value="hostel">🛏️ Auberge</option><option value="airbnb">🏠 Airbnb</option><option value="apartment">🏢 Appart</option><option value="other">📦 Autre</option></select></Field><Field label="Étoiles" half><select value={h.stars} onChange={e=>s('stars',e.target.value)}>{[1,2,3,4,5].map(x=><option key={x} value={x}>{x}⭐</option>)}</select></Field></Row>
+      <Row><Field label="Check-in" half><input type="date" value={h.check_in} onChange={e=>s('check_in',e.target.value)}/></Field><Field label="Check-out" half><input type="date" value={h.check_out} onChange={e=>s('check_out',e.target.value)}/></Field></Row>
+      <Row><Field label={`Prix/nuit (${n}n)`} half><input type="number" value={h.price_per_night} onChange={e=>calcTotal(e.target.value)} placeholder="80"/></Field><Field label="Total" half><input type="number" value={h.total_price} onChange={e=>s('total_price',e.target.value)} placeholder="auto"/></Field></Row>
+      <Field label="Adresse (pour la carte)"><input value={h.address} onChange={e=>s('address',e.target.value)} onBlur={handleAddressBlur} placeholder="12 Rue de la Paix... (géolocalisation auto)"/></Field>
+      <Field label="Référence"><input value={h.booking_ref} onChange={e=>s('booking_ref',e.target.value)} placeholder="BOOKING-XXXXXXX"/></Field>
+      <Btn full onClick={save}>{I.check} Enregistrer</Btn>
+    </Modal>
+  );
+};
+
+const ActivityForm=({trip,onAdd,onClose})=>{
+  const [a,setA]=useState({title:'',category:'sightseeing',date:trip?.start_date||'',start_time:'10:00',price:'',notes:'',is_booked:false,latitude:'',longitude:''});
+  const s=(k,v)=>setA(p=>({...p,[k]:v}));
+  const save=()=>{if(!a.title){alert('Titre requis');return;}onAdd({...a,id:uid(),price:+a.price||0,latitude:a.latitude?+a.latitude:null,longitude:a.longitude?+a.longitude:null});onClose();};
+  return(
+    <Modal onClose={onClose} title="Activité" icon="🎯">
+      <ActivityLinks trip={trip} date={a.date}/><Divider/>
+      <Field label="Titre"><input value={a.title} onChange={e=>s('title',e.target.value)} placeholder="Tour de la Sagrada Família..."/></Field>
+      <Row><Field label="Catégorie" half><select value={a.category} onChange={e=>s('category',e.target.value)}>{Object.entries(CAT_I).map(([k,v])=><option key={k} value={k}>{v} {k}</option>)}</select></Field><Field label="Date" half><input type="date" value={a.date} onChange={e=>s('date',e.target.value)}/></Field></Row>
+      <Row><Field label="Heure" half><input type="time" value={a.start_time} onChange={e=>s('start_time',e.target.value)}/></Field><Field label="Prix (€)" half><input type="number" value={a.price} onChange={e=>s('price',e.target.value)} placeholder="0"/></Field></Row>
+      <Field label="Notes"><textarea value={a.notes} onChange={e=>s('notes',e.target.value)} placeholder="Infos pratiques..." rows={2} style={{resize:'none'}}/></Field>
+      <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:18}}><input type="checkbox" id="ab" checked={a.is_booked} onChange={e=>s('is_booked',e.target.checked)}/><label htmlFor="ab" style={{fontSize:14,cursor:'pointer'}}>✅ Déjà réservée</label></div>
+      <Btn full onClick={save}>{I.check} Enregistrer</Btn>
+    </Modal>
+  );
+};
+
+const BudgetForm=({trip,onAdd,onClose})=>{
+  const [b,setB]=useState({label:'',category:'other',estimated:'',actual:'',is_paid:false});
+  const s=(k,v)=>setB(p=>({...p,[k]:v}));
+  const save=()=>{if(!b.label){alert('Description requise');return;}onAdd({...b,id:uid(),estimated:+b.estimated||0,actual:b.actual!==''?+b.actual:null});onClose();};
+  return(
+    <Modal onClose={onClose} title="Dépense" icon="💰">
+      <Field label="Description"><input value={b.label} onChange={e=>s('label',e.target.value)} placeholder="Restaurant du soir..."/></Field>
+      <Field label="Catégorie"><select value={b.category} onChange={e=>s('category',e.target.value)}>{BUDGET_CATS.map(c=><option key={c} value={c}>{c}</option>)}</select></Field>
+      <Row><Field label="Estimé (€)" half><input type="number" value={b.estimated} onChange={e=>s('estimated',e.target.value)} placeholder="0"/></Field><Field label="Réel (€)" half><input type="number" value={b.actual} onChange={e=>s('actual',e.target.value)} placeholder="0"/></Field></Row>
+      <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:18}}><input type="checkbox" id="bb" checked={b.is_paid} onChange={e=>s('is_paid',e.target.checked)}/><label htmlFor="bb" style={{fontSize:14,cursor:'pointer'}}>✅ Payé</label></div>
+      <Btn full onClick={save}>{I.check} Ajouter</Btn>
+    </Modal>
+  );
+};
+
+/* ══ SETTINGS MODAL ══════════════════════════════════════ */
+const SettingsModal=({deviceId,trips,onImport,onClose,onPull,syncStatus})=>{
+  const fileRef=useRef();const [copied,setCopied]=useState(false);const [pulling,setPulling]=useState(false);const [msg,setMsg]=useState('');
+  const copyId=()=>{navigator.clipboard.writeText(deviceId).catch(()=>{});setCopied(true);setTimeout(()=>setCopied(false),2000);};
+  const exportAll=()=>{const blob=new Blob([JSON.stringify({version:3,exported_at:new Date().toISOString(),device_id:deviceId,trips},null,2)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`palima-backup-${new Date().toISOString().slice(0,10)}.json`;a.click();};
+  const handleImport=e=>{const file=e.target.files[0];if(!file)return;const r=new FileReader();r.onload=ev=>{try{const d=JSON.parse(ev.target.result);onImport(d.trips||[]);setMsg(`✅ ${(d.trips||[]).length} voyage(s) importé(s) !`);setTimeout(()=>setMsg(''),3000);}catch{setMsg('❌ Fichier invalide');}};r.readAsText(file);e.target.value='';};
+  const handlePull=async()=>{setPulling(true);await onPull();setPulling(false);};
+  return(
+    <Modal onClose={onClose} title="Paramètres & Sauvegarde" icon="⚙️">
+      <div className="glass" style={{borderRadius:16,padding:'16px 18px',marginBottom:14}}>
+        <p style={{fontSize:13,fontWeight:600,marginBottom:3}}>🔑 Mon code appareil</p>
+        <p style={{fontSize:11,color:C.t3,lineHeight:1.5,marginBottom:10}}>Note ce code pour récupérer tes données sur un autre téléphone.</p>
+        <div style={{background:C.s3,borderRadius:10,padding:'10px 14px',fontFamily:'monospace',fontSize:11,color:C.teal,wordBreak:'break-all',marginBottom:10}}>{deviceId}</div>
+        <Btn sm outline onClick={copyId} style={{width:'100%'}}>{copied?I.check:I.copy} {copied?'Copié !':'Copier'}</Btn>
+      </div>
+      <div className="glass" style={{borderRadius:16,padding:'16px 18px',marginBottom:14}}>
+        <p style={{fontSize:13,fontWeight:600,marginBottom:4}}>☁️ Supabase Sync</p>
+        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:8,marginBottom:12}}>
+          <SyncBadge status={syncStatus}/>
+          <Btn sm onClick={handlePull} loading={pulling} color={C.teal}>{I.cloud} Restaurer cloud</Btn>
+        </div>
+      </div>
+      <div className="glass" style={{borderRadius:16,padding:'16px 18px'}}>
+        <p style={{fontSize:13,fontWeight:600,marginBottom:4}}>📦 Sauvegarde locale JSON</p>
+        {msg&&<p style={{fontSize:13,marginBottom:10,fontWeight:600}}>{msg}</p>}
+        <div style={{display:'flex',flexDirection:'column',gap:8}}>
+          <Btn full onClick={exportAll} color={C.green}>{I.dl} Exporter tous les voyages</Btn>
+          <button onClick={()=>fileRef.current.click()} style={{background:C.glass,border:`1px solid ${C.border}`,borderRadius:13,color:C.t1,padding:'13px 22px',fontWeight:600,fontSize:15,display:'flex',alignItems:'center',justifyContent:'center',gap:7}}>{I.upload} Importer JSON</button>
+          <input ref={fileRef} type="file" accept=".json" onChange={handleImport} style={{display:'none'}}/>
+        </div>
+      </div>
+      <p style={{fontSize:11,color:C.t3,textAlign:'center',marginTop:14,lineHeight:1.6}}>Palima Clone Plus v3 · 100% gratuit · localStorage + Supabase</p>
+    </Modal>
+  );
+};
+
+/* ══ TRIP DETAIL ═════════════════════════════════════════ */
+function TripDetail({trip,onUpdate,onDelete,onBack,syncStatus}){
+  const [tab,setTab]=useState('overview');
+  const [modal,setModal]=useState(null);
+  const [copied,setCopied]=useState(false);
+
+  const add=(key,item)=>onUpdate({...trip,[key]:[...(trip[key]||[]),item]});
+  const rm=(key,id)=>onUpdate({...trip,[key]:(trip[key]||[]).filter(x=>x.id!==id)});
+
+  const fl=trip.flights||[];const ho=trip.accommodations||[];const ac=trip.activities||[];const bi=trip.budget_items||[];
+  const flCost=fl.reduce((s,f)=>s+(+f.price||0),0);
+  const hoCost=ho.reduce((s,h)=>s+(+h.total_price||0),0);
+  const acCost=ac.reduce((s,a)=>s+(+a.price||0),0);
+  const biCost=bi.reduce((s,b)=>s+(b.actual!=null?+b.actual:+b.estimated||0),0);
+  const total=flCost+hoCost+acCost+biCost;
+  const budget=+trip.total_budget||0;
+  const pct=budget>0?Math.min(100,(total/budget)*100):0;
+  const tripDur=daysCount(trip.start_date,trip.end_date);
+  const checkDone=(trip.checklist||[]).filter(c=>c.checked).length;
+  const checkTotal=(trip.checklist||genChecklist(trip)).length;
+
+  const shareLink=()=>{const url=`${location.origin}${location.pathname}?share=${encShare(trip)}`;navigator.clipboard.writeText(url).catch(()=>{});setCopied(true);setTimeout(()=>setCopied(false),2500);};
+
+  const TABS=[
+    {id:'overview',icon:'📋',label:'Résumé'},
+    {id:'flights',icon:'✈️',label:`Vols${fl.length?`(${fl.length})`:''}`},
+    {id:'hotels',icon:'🏨',label:`Héberg.${ho.length?`(${ho.length})`:''}`},
+    {id:'activities',icon:'🎯',label:`Activités${ac.length?`(${ac.length})`:''}`},
+    {id:'budget',icon:'💰',label:'Budget'},
+    {id:'map',icon:'🗺️',label:'Carte'},
+    {id:'checklist',icon:'✅',label:`Check${checkDone>0?`(${checkDone}/${checkTotal})`:''}`},
+  ];
+
+  return(
+    <div style={{minHeight:'100vh',background:C.bg,paddingBottom:32}}>
+      {/* Sticky header */}
+      <div style={{background:'linear-gradient(180deg,#0a0a14 0%,#000 100%)',padding:'20px 18px 0',position:'sticky',top:0,zIndex:50}}>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:14}}>
+          <button onClick={onBack} style={{background:C.glass,border:`1px solid ${C.border}`,borderRadius:12,color:C.t1,padding:'8px 16px',display:'flex',alignItems:'center',gap:6,fontSize:14,fontWeight:500}}>
+            {I.back} Retour
+          </button>
+          <div style={{display:'flex',gap:8,alignItems:'center'}}>
+            <SyncBadge status={syncStatus}/>
+            <button onClick={()=>setModal('share')} style={{background:C.glass,border:`1px solid ${C.border}`,borderRadius:12,color:C.t2,width:38,height:38,display:'flex',alignItems:'center',justifyContent:'center'}}>{I.share}</button>
+            <button onClick={()=>setModal('edit')} style={{background:C.accent+'20',border:`1px solid ${C.accent}40`,borderRadius:12,color:C.accent,padding:'8px 14px',fontSize:13,fontWeight:600,display:'flex',alignItems:'center',gap:6}}>{I.edit}</button>
+            <button onClick={()=>{if(window.confirm(`Supprimer "${trip.title}" ?`)){onDelete(trip.id);onBack();}}} style={{background:C.red+'18',border:`1px solid ${C.red}30`,borderRadius:12,color:C.red,width:38,height:38,display:'flex',alignItems:'center',justifyContent:'center'}}>{I.trash}</button>
+          </div>
+        </div>
+        <div style={{marginBottom:14}}>
+          <div style={{display:'flex',alignItems:'center',gap:14,marginBottom:8}}>
+            <div style={{fontSize:36,background:C.s3,borderRadius:16,padding:'8px 12px',flexShrink:0}}>{trip.cover_emoji}</div>
+            <div style={{flex:1,minWidth:0}}>
+              <h1 style={{fontFamily:'Syne,sans-serif',fontSize:20,fontWeight:800,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{trip.title}</h1>
+              <p style={{color:C.t2,fontSize:13,marginTop:3}}>📍 {trip.destination}{tripDur>0?` · ${tripDur}j`:''}</p>
+            </div>
+          </div>
+          <div style={{display:'flex',gap:7,flexWrap:'wrap',alignItems:'center'}}>
+            <Tag color={STATUS_C[trip.status]}>{STATUS_L[trip.status]}</Tag>
+            {trip.start_date&&<Tag color={C.t3}>{fd(trip.start_date)}{trip.end_date?` → ${fd(trip.end_date)}`:''}</Tag>}
+            {budget>0&&<Tag color={pct>90?C.red:pct>70?C.orange:C.green}>{fc(total,trip.currency)}/{fc(budget,trip.currency)}</Tag>}
+          </div>
+        </div>
+        <div style={{display:'flex',gap:4,overflowX:'auto',paddingBottom:2,scrollbarWidth:'none'}}>
+          {TABS.map(t=>(<button key={t.id} onClick={()=>setTab(t.id)} style={{background:tab===t.id?C.accent:'transparent',color:tab===t.id?'#fff':C.t2,border:`1px solid ${tab===t.id?C.accent:C.border}`,borderRadius:10,padding:'7px 11px',fontSize:11,fontWeight:600,whiteSpace:'nowrap',flexShrink:0,transition:'all .18s'}}>{t.icon} {t.label}</button>))}
+        </div>
+      </div>
+
+      <div style={{padding:'18px 18px 0'}}>
+        {/* OVERVIEW */}
+        {tab==='overview'&&(
+          <div className="fade-up">
+            <SmartSuggestions trip={trip}/>
+            <WeatherWidget trip={trip}/>
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:16}}>
+              {[{l:'Vols',v:fl.length,i:'✈️',c:C.accent,s:fc(flCost,trip.currency)},{l:'Nuitées',v:ho.reduce((s,h)=>s+nights(h.check_in,h.check_out),0),i:'🌙',c:C.purple,s:fc(hoCost,trip.currency)},{l:'Activités',v:ac.length,i:'🎯',c:C.green,s:fc(acCost,trip.currency)},{l:'Total',v:fc(total,trip.currency),i:'💰',c:pct>90?C.red:C.orange,s:budget?`/${fc(budget,trip.currency)}`:''}].map(x=>(
+                <div key={x.l} className="glass" style={{borderRadius:16,padding:'14px 16px'}}>
+                  <span style={{fontSize:20}}>{x.i}</span>
+                  <div style={{fontFamily:'Syne,sans-serif',fontSize:x.l==='Total'?14:23,fontWeight:700,color:x.c,marginTop:7,wordBreak:'break-all'}}>{x.v}</div>
+                  {x.s&&<div style={{fontSize:11,color:C.t2,marginTop:2}}>{x.s}</div>}
+                  <div style={{fontSize:11,color:C.t3,marginTop:3}}>{x.l}</div>
+                </div>
+              ))}
+            </div>
+            {budget>0&&(
+              <div className="glass" style={{borderRadius:16,padding:'16px 20px',marginBottom:16}}>
+                <div style={{display:'flex',justifyContent:'space-between',marginBottom:10}}><span style={{fontSize:13,fontWeight:600}}>Budget</span><span style={{fontSize:13,fontWeight:700,color:pct>90?C.red:pct>70?C.orange:C.green}}>{Math.round(pct)}%</span></div>
+                <div style={{background:C.s3,borderRadius:8,height:10,overflow:'hidden'}}><div style={{width:pct+'%',height:'100%',background:pct>90?C.red:pct>70?C.orange:C.green,borderRadius:8,transition:'width .6s'}}/></div>
+                <div style={{display:'flex',justifyContent:'space-between',marginTop:8,fontSize:12,color:C.t2}}>
+                  <span>{fc(total,trip.currency)}</span><span style={{color:budget-total>=0?C.green:C.red,fontWeight:600}}>{budget-total>=0?`Reste ${fc(budget-total,trip.currency)}`:`+${fc(total-budget,trip.currency)} dépassement`}</span>
+                </div>
+              </div>
+            )}
+            {trip.notes&&<div className="glass" style={{borderRadius:16,padding:'14px 18px',marginBottom:16}}><p style={{fontSize:12,color:C.t3,marginBottom:4,fontWeight:600,textTransform:'uppercase',letterSpacing:.8}}>Notes</p><p style={{fontSize:14,color:C.t2,lineHeight:1.6}}>{trip.notes}</p></div>}
+            <div style={{display:'flex',flexDirection:'column',gap:10}}><FlightLinks trip={trip}/><HotelLinks trip={trip}/><ActivityLinks trip={trip}/></div>
+          </div>
+        )}
+
+        {/* FLIGHTS */}
+        {tab==='flights'&&(
+          <div className="fade-up">
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:14}}><h3 style={{fontFamily:'Syne,sans-serif',fontSize:17,fontWeight:700}}>Vols</h3><Btn sm onClick={()=>setModal('flight')}>{I.plus} Ajouter</Btn></div>
+            <FlightLinks trip={trip}/>
+            <div style={{marginTop:16}}>
+              {fl.length===0?(<div style={{textAlign:'center',padding:'44px 20px',color:C.t3}}><div style={{fontSize:44,marginBottom:12}}>✈️</div><p>Aucun vol enregistré</p></div>):
+              fl.map(f=>{
+                const dep=f.departure_datetime?new Date(f.departure_datetime):null;const arr=f.arrival_datetime?new Date(f.arrival_datetime):null;const dur=dep&&arr?Math.round((arr-dep)/60000):null;
+                return(<div key={f.id} className="glass scale-in" style={{borderRadius:16,padding:'16px 18px',marginBottom:10}}>
+                  <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:8}}>
+                    <div><div style={{fontFamily:'Syne,sans-serif',fontSize:19,fontWeight:800,letterSpacing:.5}}>{f.origin_iata} <span style={{color:C.t3,fontWeight:300}}>→</span> {f.destination_iata}</div>{f.airline&&<p style={{fontSize:13,color:C.t2,marginTop:2}}>{f.airline}{f.flight_number?` · ${f.flight_number}`:''}</p>}</div>
+                    <div style={{display:'flex',flexDirection:'column',alignItems:'flex-end',gap:6}}>{f.price>0&&<span style={{fontFamily:'Syne,sans-serif',fontSize:16,fontWeight:700,color:C.accent}}>{fc(f.price,trip.currency)}</span>}<button onClick={()=>rm('flights',f.id)} style={{background:'none',color:C.red+'70',padding:4,display:'flex'}}>{I.trash}</button></div>
+                  </div>
+                  {dep&&<p style={{fontSize:12,color:C.t2,marginBottom:8}}>{dep.toLocaleString('fr-FR',{weekday:'short',day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'})} → {arr?arr.toLocaleString('fr-FR',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}):'—'}{dur?<span style={{color:C.t3}}> · {Math.floor(dur/60)}h{String(dur%60).padStart(2,'0')}</span>:null}</p>}
+                  <div style={{display:'flex',flexWrap:'wrap',gap:6}}>
+                    <Tag color={f.type==='outbound'?C.accent:f.type==='return'?C.green:C.orange} sm>{f.type==='outbound'?'Aller':f.type==='return'?'Retour':'Escale'}</Tag>
+                    {f.cabin_class&&f.cabin_class!=='economy'&&<Tag color={C.purple} sm>{f.cabin_class}</Tag>}
+                    {f.baggage&&<Tag color={C.green} sm>🧳 Bagage</Tag>}
+                    {f.booking_ref&&<Tag color={C.t3} sm>Réf: {f.booking_ref}</Tag>}
+                  </div>
+                </div>);
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* HOTELS */}
+        {tab==='hotels'&&(
+          <div className="fade-up">
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:14}}><h3 style={{fontFamily:'Syne,sans-serif',fontSize:17,fontWeight:700}}>Hébergements</h3><Btn sm onClick={()=>setModal('hotel')}>{I.plus} Ajouter</Btn></div>
+            <HotelLinks trip={trip}/>
+            <div style={{marginTop:16}}>
+              {ho.length===0?(<div style={{textAlign:'center',padding:'44px 20px',color:C.t3}}><div style={{fontSize:44,marginBottom:12}}>🏨</div><p>Aucun hébergement</p></div>):
+              ho.map(h=>{const n=nights(h.check_in,h.check_out);return(
+                <div key={h.id} className="glass scale-in" style={{borderRadius:16,padding:'16px 18px',marginBottom:10}}>
+                  <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:8}}>
+                    <div style={{flex:1,minWidth:0}}><div style={{fontFamily:'Syne,sans-serif',fontSize:16,fontWeight:700,marginBottom:4}}>{h.name}{h.stars>0&&<span style={{color:C.orange,fontSize:12,marginLeft:6}}>{'⭐'.repeat(Math.min(h.stars,5))}</span>}</div><p style={{fontSize:13,color:C.t2}}>{fd(h.check_in)} → {fd(h.check_out)}{n>0?` · ${n}n`:''}</p>{h.address&&<p style={{fontSize:12,color:C.t3,marginTop:4}}>📍 {h.address}</p>}</div>
+                    <div style={{display:'flex',flexDirection:'column',alignItems:'flex-end',gap:6,marginLeft:10}}>{h.total_price>0&&<span style={{fontFamily:'Syne,sans-serif',fontSize:16,fontWeight:700,color:C.accent}}>{fc(h.total_price,trip.currency)}</span>}{h.price_per_night>0&&<span style={{fontSize:11,color:C.t3}}>{fc(h.price_per_night)}/n</span>}<button onClick={()=>rm('accommodations',h.id)} style={{background:'none',color:C.red+'70',padding:4,display:'flex'}}>{I.trash}</button></div>
+                  </div>
+                  {h.booking_ref&&<Tag color={C.t3} sm>Réf: {h.booking_ref}</Tag>}
+                </div>
+              );})}
+            </div>
+          </div>
+        )}
+
+        {/* ACTIVITIES */}
+        {tab==='activities'&&(
+          <div className="fade-up">
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:14}}><h3 style={{fontFamily:'Syne,sans-serif',fontSize:17,fontWeight:700}}>Activités</h3><Btn sm color={C.green} onClick={()=>setModal('activity')}>{I.plus} Ajouter</Btn></div>
+            <ActivityLinks trip={trip}/>
+            <div style={{marginTop:16}}>
+              {ac.length===0?(<div style={{textAlign:'center',padding:'44px 20px',color:C.t3}}><div style={{fontSize:44,marginBottom:12}}>🎯</div><p>Aucune activité</p></div>):
+              ac.sort((a,b)=>(a.date||'').localeCompare(b.date||'')).map(a=>(
+                <div key={a.id} className="glass scale-in" style={{borderRadius:16,padding:'16px 18px',marginBottom:10}}>
+                  <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:8}}>
+                    <div style={{flex:1,minWidth:0}}><div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap',marginBottom:4}}><span style={{fontSize:18}}>{CAT_I[a.category]||'📌'}</span><span style={{fontFamily:'Syne,sans-serif',fontSize:15,fontWeight:700}}>{a.title}</span>{a.is_booked&&<Tag color={C.green} sm>✓ Réservé</Tag>}</div><p style={{fontSize:13,color:C.t2}}>{fd(a.date)}{a.start_time?` · ${a.start_time}`:''}</p>{a.notes&&<p style={{fontSize:12,color:C.t3,marginTop:4,fontStyle:'italic'}}>{a.notes}</p>}</div>
+                    <div style={{display:'flex',flexDirection:'column',alignItems:'flex-end',gap:6,marginLeft:10}}>{a.price>0&&<span style={{fontFamily:'Syne,sans-serif',fontSize:16,fontWeight:700,color:C.green}}>{fc(a.price,trip.currency)}</span>}<button onClick={()=>rm('activities',a.id)} style={{background:'none',color:C.red+'70',padding:4,display:'flex'}}>{I.trash}</button></div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* BUDGET */}
+        {tab==='budget'&&(
+          <div className="fade-up">
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:14}}><h3 style={{fontFamily:'Syne,sans-serif',fontSize:17,fontWeight:700}}>Budget</h3><Btn sm color={C.orange} onClick={()=>setModal('budget')}>{I.plus} Dépense</Btn></div>
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:14}}>
+              {[{l:'Vols',v:flCost,i:'✈️',c:C.accent},{l:'Hébergements',v:hoCost,i:'🏨',c:C.purple},{l:'Activités',v:acCost,i:'🎯',c:C.green},{l:'Divers',v:biCost,i:'📋',c:C.orange}].map(x=>(
+                <div key={x.l} className="glass" style={{borderRadius:14,padding:'14px 16px'}}><span style={{fontSize:18}}>{x.i}</span><div style={{fontFamily:'Syne,sans-serif',fontSize:16,fontWeight:700,color:x.c,marginTop:6}}>{fc(x.v,trip.currency)}</div><div style={{fontSize:11,color:C.t3,marginTop:2}}>{x.l}</div></div>
+              ))}
+            </div>
+            <div className="glass" style={{borderRadius:16,padding:'20px',marginBottom:14}}>
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-end',marginBottom:12}}>
+                <div><p style={{fontSize:12,color:C.t2,marginBottom:4}}>Total dépensé</p><p style={{fontFamily:'Syne,sans-serif',fontSize:26,fontWeight:800,color:pct>90?C.red:C.t1}}>{fc(total,trip.currency)}</p></div>
+                {budget>0&&<div style={{textAlign:'right'}}><p style={{fontSize:12,color:C.t2,marginBottom:4}}>Budget</p><p style={{fontFamily:'Syne,sans-serif',fontSize:26,fontWeight:800}}>{fc(budget,trip.currency)}</p></div>}
+              </div>
+              {budget>0&&<><div style={{background:C.s3,borderRadius:8,height:12,overflow:'hidden'}}><div style={{width:pct+'%',height:'100%',background:pct>90?C.red:pct>70?C.orange:C.green,borderRadius:8,transition:'width .6s'}}/></div><p style={{textAlign:'center',marginTop:10,fontSize:14,fontWeight:700,color:budget-total>=0?C.green:C.red}}>{budget-total>=0?`✅ Reste ${fc(budget-total,trip.currency)}`:`⚠️ +${fc(total-budget,trip.currency)} dépassement`}</p></>}
+            </div>
+            {bi.map(b=>(<div key={b.id} className="glass" style={{borderRadius:12,padding:'12px 16px',marginBottom:8,display:'flex',justifyContent:'space-between',alignItems:'center'}}><div><p style={{fontSize:14,fontWeight:600}}>{b.label}</p><p style={{fontSize:12,color:C.t2,marginTop:2}}>{b.category}{b.is_paid&&<span style={{color:C.green}}> · ✅</span>}</p></div><div style={{display:'flex',alignItems:'center',gap:10}}><div style={{textAlign:'right'}}>{b.actual!=null&&<p style={{fontFamily:'Syne,sans-serif',fontSize:15,fontWeight:700,color:C.orange}}>{fc(b.actual,trip.currency)}</p>}{b.estimated>0&&<p style={{fontSize:11,color:C.t3}}>est. {fc(b.estimated,trip.currency)}</p>}</div><button onClick={()=>rm('budget_items',b.id)} style={{background:'none',color:C.red+'70',padding:4,display:'flex'}}>{I.trash}</button></div></div>))}
+          </div>
+        )}
+
+        {/* MAP */}
+        {tab==='map'&&(<div className="fade-up"><MapView trip={trip}/></div>)}
+
+        {/* CHECKLIST */}
+        {tab==='checklist'&&(<ChecklistTab trip={{...trip,checklist:trip.checklist||genChecklist(trip)}} onUpdate={onUpdate}/>)}
+      </div>
+
+      {/* Modals */}
+      {modal==='flight'&&<FlightForm trip={trip} onAdd={f=>add('flights',f)} onClose={()=>setModal(null)}/>}
+      {modal==='hotel'&&<HotelForm trip={trip} onAdd={h=>add('accommodations',h)} onClose={()=>setModal(null)}/>}
+      {modal==='activity'&&<ActivityForm trip={trip} onAdd={a=>add('activities',a)} onClose={()=>setModal(null)}/>}
+      {modal==='budget'&&<BudgetForm trip={trip} onAdd={b=>add('budget_items',b)} onClose={()=>setModal(null)}/>}
+      {modal==='edit'&&<CreateTripWizard existing={trip} onSave={upd=>onUpdate({...trip,...upd})} onClose={()=>setModal(null)}/>}
+      {modal==='share'&&(
+        <Modal onClose={()=>setModal(null)} title="Partager" icon="🔗">
+          <button onClick={shareLink} style={{background:copied?C.green+'20':C.accent+'18',border:`1px solid ${copied?C.green:C.accent}35`,borderRadius:14,padding:'16px 20px',color:copied?C.green:C.accent,fontWeight:600,fontSize:15,display:'flex',alignItems:'center',gap:10,width:'100%',justifyContent:'center',transition:'all .2s'}}>
+            {copied?I.check:I.copy} {copied?'Lien copié !':'Copier le lien de partage'}
+          </button>
+          <p style={{fontSize:12,color:C.t3,marginTop:14,textAlign:'center',lineHeight:1.7}}>Le lien encode tout le voyage dans l'URL.<br/>Ton ami peut l'ouvrir et l'importer.</p>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+/* ══ DASHBOARD ═══════════════════════════════════════════ */
+function Dashboard({trips,onCreate,onSelect,syncStatus,onSettings}){
+  const now=new Date();
+  const ongoing=trips.filter(t=>t.status==='ongoing');
+  const upcoming=trips.filter(t=>t.status==='planning'&&t.start_date&&new Date(t.start_date)>now);
+  const past=trips.filter(t=>t.status==='completed'||(t.end_date&&new Date(t.end_date)<now&&t.status!=='planning'));
+  const other=trips.filter(t=>!ongoing.includes(t)&&!upcoming.includes(t)&&!past.includes(t));
+
+  const TripCard=({trip,i})=>{
+    const fl=trip.flights||[];const ho=trip.accommodations||[];const ac=trip.activities||[];const bi=trip.budget_items||[];
+    const total=fl.reduce((s,f)=>s+(+f.price||0),0)+ho.reduce((s,h)=>s+(+h.total_price||0),0)+ac.reduce((s,a)=>s+(+a.price||0),0)+bi.reduce((s,b)=>s+(b.actual!=null?+b.actual:+b.estimated||0),0);
+    const budget=+trip.total_budget||0;const pct=budget>0?Math.min(100,(total/budget)*100):0;
+    const d=daysCount(trip.start_date,trip.end_date);
+    const start=trip.start_date?new Date(trip.start_date):null;
+    const daysUntil=start&&start>now?Math.ceil((start-now)/86400000):null;
+    const checkList=trip.checklist||[];const checkDone=checkList.filter(c=>c.checked).length;
+    return(
+      <div onClick={()=>onSelect(trip)} className="fade-up glass" style={{borderRadius:20,padding:'18px 20px',cursor:'pointer',animationDelay:i*.05+'s',transition:'border-color .2s'}}
+        onMouseEnter={e=>e.currentTarget.style.borderColor=C.accent+'50'} onMouseLeave={e=>e.currentTarget.style.borderColor=C.border}>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start'}}>
+          <div style={{display:'flex',gap:14,alignItems:'center',flex:1,minWidth:0}}>
+            <div style={{fontSize:32,background:C.s3,borderRadius:14,padding:'8px 12px',flexShrink:0}}>{trip.cover_emoji}</div>
+            <div style={{flex:1,minWidth:0}}>
+              <h3 style={{fontFamily:'Syne,sans-serif',fontSize:17,fontWeight:700,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{trip.title}</h3>
+              <p style={{fontSize:13,color:C.t2,marginTop:3}}>📍 {trip.destination}{d>0?` · ${d}j`:''}</p>
+              {daysUntil!==null&&<p style={{fontSize:11,color:daysUntil<=7?C.orange:C.accent,marginTop:3,fontWeight:600}}>⏳ Dans {daysUntil} jour{daysUntil>1?'s':''}</p>}
+            </div>
+          </div>
+          <Tag color={STATUS_C[trip.status]} sm>{STATUS_L[trip.status]}</Tag>
+        </div>
+        <div style={{display:'flex',gap:12,marginTop:12,fontSize:12,color:C.t2,flexWrap:'wrap',alignItems:'center'}}>
+          {fl.length>0&&<span>✈️ {fl.length}</span>}
+          {ho.length>0&&<span>🏨 {ho.length}</span>}
+          {ac.length>0&&<span>🎯 {ac.length}</span>}
+          {checkList.length>0&&<span style={{color:checkDone===checkList.length?C.green:C.t2}}>✅ {checkDone}/{checkList.length}</span>}
+          {budget>0&&<span style={{marginLeft:'auto',color:pct>90?C.red:C.accent,fontWeight:600}}>{fc(total,trip.currency)}/{fc(budget,trip.currency)}</span>}
+        </div>
+        {budget>0&&<div style={{background:C.s3,borderRadius:4,height:4,marginTop:10,overflow:'hidden'}}><div style={{width:pct+'%',height:'100%',background:pct>90?C.red:pct>70?C.orange:C.accent,borderRadius:4,transition:'width .4s'}}/></div>}
+      </div>
+    );
+  };
+
+  const Section=({title,list})=>list.length===0?null:(
+    <div style={{marginBottom:24}}><p style={{fontSize:11,color:C.t3,fontWeight:700,textTransform:'uppercase',letterSpacing:1.2,marginBottom:12}}>{title}</p><div style={{display:'flex',flexDirection:'column',gap:10}}>{list.map((t,i)=><TripCard key={t.id} trip={t} i={i}/>)}</div></div>
+  );
+
+  return(
+    <div style={{minHeight:'100vh',background:C.bg}}>
+      <div style={{background:'linear-gradient(160deg,#0a0a1f 0%,#060610 50%,#000 100%)',padding:'52px 22px 32px',position:'relative',overflow:'hidden'}}>
+        <div style={{position:'absolute',top:-60,right:-60,width:200,height:200,background:C.accent+'08',borderRadius:'50%',filter:'blur(40px)'}}/>
+        <div style={{position:'absolute',bottom:-40,left:-40,width:150,height:150,background:C.purple+'08',borderRadius:'50%',filter:'blur(30px)'}}/>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:8}}>
+          <div>
+            <p style={{fontSize:11,color:C.accent,fontWeight:700,letterSpacing:2.5,textTransform:'uppercase',marginBottom:4}}>Palima Clone Plus ✦ v3</p>
+            <h1 style={{fontFamily:'Syne,sans-serif',fontSize:32,fontWeight:800,lineHeight:1.1}}>Mes voyages</h1>
+          </div>
+          <button onClick={onSettings} style={{background:C.glass,border:`1px solid ${C.border}`,borderRadius:14,color:C.t2,width:42,height:42,display:'flex',alignItems:'center',justifyContent:'center',backdropFilter:'blur(10px)',flexShrink:0}}>
+            {I.settings}
+          </button>
+        </div>
+        <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:24}}>
+          <p style={{fontSize:14,color:C.t2}}>Météo · Carte · Checklist · Budget</p>
+          <SyncBadge status={syncStatus}/>
+        </div>
+        <Btn onClick={onCreate}>{I.plus} Nouveau voyage</Btn>
+        {trips.length>0&&(
+          <div style={{display:'flex',gap:20,marginTop:24,paddingTop:20,borderTop:`1px solid ${C.border}`}}>
+            {[{l:'Voyages',v:trips.length},{l:'En cours',v:ongoing.length},{l:'Planifiés',v:upcoming.length}].map(x=>(<div key={x.l}><p style={{fontFamily:'Syne,sans-serif',fontSize:22,fontWeight:800}}>{x.v}</p><p style={{fontSize:12,color:C.t3}}>{x.l}</p></div>))}
+          </div>
+        )}
+      </div>
+      <div style={{padding:'24px 18px'}}>
+        {trips.length===0?(
+          <div style={{textAlign:'center',padding:'60px 20px'}}>
+            <div style={{fontSize:60,marginBottom:20}}>🌍</div>
+            <h2 style={{fontFamily:'Syne,sans-serif',fontSize:22,color:C.t2,marginBottom:10}}>Aucun voyage</h2>
+            <p style={{fontSize:14,color:C.t3,lineHeight:1.7,maxWidth:280,margin:'0 auto 28px'}}>Crée ton premier voyage et laisse-toi guider étape par étape.</p>
+            <Btn onClick={onCreate}>{I.plus} Créer mon premier voyage</Btn>
+          </div>
+        ):(
+          <><Section title="🟢 En cours" list={ongoing}/><Section title="🔵 À venir" list={upcoming}/><Section title="📦 Autres" list={other}/><Section title="✅ Terminés" list={past}/></>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ══ APP ROOT ════════════════════════════════════════════ */
+function App(){
+  const [data,setData]=useState(()=>{const d=LS.get();return{trips:d.trips||[]};});
+  const [selected,setSelected]=useState(null);
+  const [showCreate,setShowCreate]=useState(false);
+  const [showSettings,setShowSettings]=useState(false);
+  const [hydrated,setHydrated]=useState(false);
+  const {deviceId,syncStatus,debouncedSync,deleteFromCloud,pullFromCloud}=useSyncEngine();
+
+  const save=useCallback((d,sync=true)=>{setData(d);LS.set(d);if(sync&&d.trips)d.trips.forEach(t=>debouncedSync(t));},[debouncedSync]);
+
+  useEffect(()=>{
+    const init=async()=>{
+      const cloudTrips=await pullFromCloud();
+      if(cloudTrips&&cloudTrips.length>0){
+        const local=LS.get();const localTrips=local.trips||[];
+        const merged=new Map();localTrips.forEach(t=>merged.set(t.id,t));cloudTrips.forEach(t=>merged.set(t.id,t));
+        const newData={trips:Array.from(merged.values())};setData(newData);LS.set(newData);
+      }
+      setHydrated(true);
+    };
+    init();
+  },[]);
+
+  useEffect(()=>{
+    const p=new URLSearchParams(window.location.search);const share=p.get('share');
+    if(share){try{const trip=decShare(share);if(window.confirm(`🌍 Voyage partagé : "${trip.title}"\n\nImporter ?`)){const nt={...trip,id:uid(),title:trip.title+' (partagé)',created_at:new Date().toISOString()};save({...data,trips:[nt,...(data.trips||[])]});}}catch{}window.history.replaceState({},'',window.location.pathname);}
+    if(window.location.search==='?action=new')setShowCreate(true);
+  },[]);
+
+  useEffect(()=>{if('serviceWorker' in navigator)navigator.serviceWorker.register('./sw.js').catch(()=>{});},[]);
+
+  const createTrip=useCallback(async(t)=>{
+    const nt={...t,id:uid(),flights:[],accommodations:[],activities:[],budget_items:[],checklist:genChecklist(t),created_at:new Date().toISOString()};
+    if(!nt.lat&&nt.destination){const geo=await geocode(nt.destination);if(geo){nt.lat=geo.lat;nt.lng=geo.lng;}}
+    const newData={...data,trips:[nt,...data.trips]};save(newData);
+  },[data,save]);
+
+  const updateTrip=useCallback((updated)=>{const trips=data.trips.map(t=>t.id===updated.id?updated:t);const newData={...data,trips};save(newData);setSelected(updated);},[data,save]);
+  const deleteTrip=useCallback((id)=>{save({...data,trips:data.trips.filter(t=>t.id!==id)},false);deleteFromCloud(id);},[data,save,deleteFromCloud]);
+  const importTrips=useCallback((imported)=>{const existing=new Map(data.trips.map(t=>[t.id,t]));imported.forEach(t=>existing.set(t.id,{...t,id:t.id||uid()}));save({...data,trips:Array.from(existing.values())});setShowSettings(false);},[data,save]);
+  const handlePull=useCallback(async()=>{const cloudTrips=await pullFromCloud();if(cloudTrips){const merged=new Map(data.trips.map(t=>[t.id,t]));cloudTrips.forEach(t=>merged.set(t.id,t));const newData={...data,trips:Array.from(merged.values())};setData(newData);LS.set(newData);}},[data,pullFromCloud]);
+
+  if(!hydrated)return(
+    <div style={{minHeight:'100vh',background:C.bg,display:'flex',alignItems:'center',justifyContent:'center',flexDirection:'column',gap:16}}>
+      <div style={{fontSize:44}}>🌍</div>
+      <p style={{fontFamily:'Syne,sans-serif',fontSize:18,fontWeight:700}}>Palima Clone Plus</p>
+      <p className="pulse" style={{fontSize:13,color:C.t3}}>Chargement & synchronisation...</p>
+    </div>
+  );
+
+  const liveSelected=selected?data.trips.find(t=>t.id===selected.id)||selected:null;
+
+  return(
+    <>
+      {liveSelected?(
+        <TripDetail trip={liveSelected} onUpdate={updateTrip} onDelete={deleteTrip} onBack={()=>setSelected(null)} syncStatus={syncStatus}/>
+      ):(
+        <Dashboard trips={data.trips} onCreate={()=>setShowCreate(true)} onSelect={setSelected} syncStatus={syncStatus} onSettings={()=>setShowSettings(true)}/>
+      )}
+      {showCreate&&<CreateTripWizard onSave={createTrip} onClose={()=>setShowCreate(false)}/>}
+      {showSettings&&<SettingsModal deviceId={deviceId} trips={data.trips} onImport={importTrips} onClose={()=>setShowSettings(false)} onPull={handlePull} syncStatus={syncStatus}/>}
+    </>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
+</script>
+</body>
+</html>
+HTMLEOF
