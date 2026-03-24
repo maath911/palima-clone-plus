@@ -1765,48 +1765,202 @@ const BudgetForm=({trip,onAdd,onClose})=>{
 
 /* ══ WIZARD ══════════════════════════════════════════════ */
 const WIZARD_STEPS=[{id:'destination',title:'Où et quand ?',icon:'📍',desc:'Destination et dates'},{ id:'advisor',title:'Conseiller IA',icon:'🧠',desc:'Estimations et recommandations'},{id:'budget',title:'Budget',icon:'💰',desc:'Optionnel'},{id:'style',title:'Personnalise',icon:'🎨',desc:'Emoji et notes'}];
+const AI_WIZARD_STEPS=[{id:'destination',title:'Où et quand ?',icon:'📍',desc:'Destination et dates'},{id:'ai_generate',title:'Suggestions IA',icon:'🤖',desc:'L\'IA prépare ton itinéraire'},{id:'advisor',title:'Conseiller IA',icon:'🧠',desc:'Estimations et recommandations'},{id:'budget',title:'Budget',icon:'💰',desc:'Optionnel'},{id:'style',title:'Personnalise',icon:'🎨',desc:'Emoji et notes'}];
+
+/* ══ REPLACE MODAL ════════════════════════════════════════ */
+const ReplaceModal=({item,trip,onReplace,onClose})=>{
+  const [criteria,setCriteria]=useState('');
+  const [loading,setLoading]=useState(false);
+  const [suggestions,setSuggestions]=useState([]);
+  const search=async()=>{
+    setLoading(true);setSuggestions([]);
+    try{
+      const prompt=`Tu es un guide expert. Remplace cette suggestion pour ${trip.destination}: "${item.title||item.name||'activité'}". Critères: "${criteria||'similaire mais différent'}". Propose 3 alternatives variées. Réponds UNIQUEMENT en JSON valide sans markdown: {"alternatives":[{"name":"...","icon":"emoji","description":"Une phrase concrète","price_range":"Gratuit|0-15€|15-40€|40€+","tip":"Conseil pratique court","category":"Activité|Restaurant|Culture|Nature"}]}`;
+      const resp=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:800,messages:[{role:'user',content:prompt}]})});
+      const data=await resp.json();
+      const text=data.content?.[0]?.text||'{}';
+      const parsed=JSON.parse(text.replace(/```json|```/g,'').trim());
+      setSuggestions(parsed.alternatives||[]);
+    }catch(e){console.error(e);setSuggestions([]);}
+    finally{setLoading(false);}
+  };
+  return(
+    <Modal onClose={onClose} title="Remplacer la suggestion" icon="🔄">
+      <div style={{background:'rgba(255,255,255,.04)',border:`1px solid ${C.border}`,borderRadius:12,padding:'10px 14px',marginBottom:14}}>
+        <p style={{fontSize:12,color:C.t3,marginBottom:2}}>Suggestion actuelle</p>
+        <p style={{fontSize:14,fontWeight:600}}>{item.icon||'📌'} {item.title||item.name}</p>
+      </div>
+      <Field label="Tes critères (optionnel)"><input value={criteria} onChange={e=>setCriteria(e.target.value)} placeholder="ex: végétarien, moins de 30€, en plein air..." onKeyDown={e=>e.key==='Enter'&&search()}/></Field>
+      <Btn full onClick={search} loading={loading} color={C.accent}>{loading?'Recherche en cours...':'🤖 Rechercher avec l\'IA'}</Btn>
+      {!loading&&suggestions.length===0&&criteria&&<p style={{fontSize:12,color:C.red,marginTop:8,textAlign:'center'}}>Aucun résultat. Réessaie avec d'autres critères.</p>}
+      {suggestions.length>0&&(
+        <div style={{marginTop:16}}>
+          <p style={{fontSize:11,color:C.t3,fontWeight:700,marginBottom:10,textTransform:'uppercase',letterSpacing:1}}>3 alternatives — clique pour remplacer</p>
+          {suggestions.map((s,i)=>(
+            <div key={i} onClick={()=>onReplace(s)} style={{background:'rgba(0,122,255,.07)',border:'1.5px dashed rgba(0,122,255,.4)',borderRadius:14,padding:'14px 16px',marginBottom:10,cursor:'pointer',transition:'all .15s'}} onMouseEnter={e=>e.currentTarget.style.background='rgba(0,122,255,.15)'} onMouseLeave={e=>e.currentTarget.style.background='rgba(0,122,255,.07)'}>
+              <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:6}}>
+                <span style={{fontSize:22}}>{s.icon}</span>
+                <span style={{fontFamily:'Syne,sans-serif',fontSize:14,fontWeight:700,flex:1}}>{s.name}</span>
+                <span style={{background:'rgba(0,122,255,.2)',color:C.accent,borderRadius:6,padding:'2px 8px',fontSize:11,fontWeight:700,whiteSpace:'nowrap'}}>{s.price_range}</span>
+              </div>
+              <p style={{fontSize:12,color:C.t2,marginBottom:4,lineHeight:1.5}}>{s.description}</p>
+              {s.tip&&<p style={{fontSize:11,color:C.orange}}>💡 {s.tip}</p>}
+            </div>
+          ))}
+        </div>
+      )}
+    </Modal>
+  );
+};
 const CreateTripWizard=({onSave,onClose,existing})=>{
+  const [tripMode,setTripMode]=useState(existing?.trip_mode||null);
   const [step,setStep]=useState(0);
   const [t,setT]=useState(existing||{title:'',destination:'',destination_iata:'',start_date:'',end_date:'',total_budget:'',currency:'EUR',status:'planning',cover_emoji:'✈️',notes:'',advisor:null});
   const [geocoding,setGeocoding]=useState(false);
   const [showAdvisor,setShowAdvisor]=useState(false);
+  const [aiSuggestions,setAiSuggestions]=useState([]);
+  const [aiLoading,setAiLoading]=useState(false);
+  const [aiGenDone,setAiGenDone]=useState(false);
   const s=(k,v)=>setT(p=>({...p,[k]:v}));
   const db=findDestination(t.destination);
+  const STEPS=tripMode==='ai'?AI_WIZARD_STEPS:WIZARD_STEPS;
   const handleDestinationBlur=async()=>{if(!t.destination||t.lat)return;setGeocoding(true);const geo=await geocode(t.destination);if(geo)setT(p=>({...p,lat:geo.lat,lng:geo.lng}));setGeocoding(false);};
   const canProceed=()=>step!==0||(t.title.length>0&&t.destination.length>0&&t.start_date.length>0);
-  const save=()=>{if(!t.title||!t.destination||!t.start_date){alert('Titre, destination et date requis');return;}onSave({...t,total_budget:+t.total_budget||0});onClose();};
+  const toggleAISuggestion=(i)=>setAiSuggestions(p=>p.map((s,idx)=>idx===i?{...s,isChecked:!s.isChecked}:s));
+  const generateAI=async()=>{
+    setAiLoading(true);setAiGenDone(false);setAiSuggestions([]);
+    try{
+      const prompt=`Tu es un expert voyageur. Génère 5 activités incontournables ET 3 restaurants emblématiques pour ${t.destination}. Budget indicatif: ${t.total_budget?t.total_budget+'€':'moyen'}. Réponds UNIQUEMENT en JSON valide sans markdown: {"suggestions":[{"name":"...","icon":"emoji","type":"activity|restaurant","description":"Une phrase concrète sur l'expérience","tip":"Conseil pratique court","price_range":"Gratuit|0-20€|20-50€|50€+","category":"Culture|Nature|Gastronomie|Shopping|Histoire|Détente"}]}`;
+      const resp=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:1200,messages:[{role:'user',content:prompt}]})});
+      const data=await resp.json();
+      const text=data.content?.[0]?.text||'{}';
+      const parsed=JSON.parse(text.replace(/```json|```/g,'').trim());
+      setAiSuggestions((parsed.suggestions||[]).map(s=>({...s,isChecked:true})));
+      setAiGenDone(true);
+    }catch(e){console.error(e);setAiGenDone(true);}
+    finally{setAiLoading(false);}
+  };
+  const save=()=>{
+    if(!t.title||!t.destination||!t.start_date){alert('Titre, destination et date requis');return;}
+    const activities=tripMode==='ai'?aiSuggestions.filter(s=>s.isChecked).map(s=>({id:uid(),title:s.name,icon:s.icon,category:s.type==='restaurant'?'food':'other',date:'',start_time:'',price:0,notes:s.description||'',is_booked:false,source:'ai',isChecked:true,description:s.description,tip:s.tip,status:'suggested'})):[];
+    onSave({...t,trip_mode:tripMode,total_budget:+t.total_budget||0,activities});
+    onClose();
+  };
   const dur=t.start_date&&t.end_date?daysCount(t.start_date,t.end_date):0;
   const selMonth=t.start_date?new Date(t.start_date+'T00:00:00').getMonth():new Date().getMonth();
   const monthScore=db?.months[selMonth];
+
+  /* ── MODE SELECTOR (full screen) ── */
+  if(!tripMode&&!existing)return(
+    <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.97)',backdropFilter:'blur(24px)',WebkitBackdropFilter:'blur(24px)',zIndex:200,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',padding:'28px 22px'}}>
+      <div className="fade-up" style={{textAlign:'center',marginBottom:32}}>
+        <p style={{fontSize:11,color:C.accent,fontWeight:700,letterSpacing:2.5,textTransform:'uppercase',marginBottom:10}}>✈️ Nouveau voyage</p>
+        <h1 style={{fontFamily:'Syne,sans-serif',fontSize:26,fontWeight:800,lineHeight:1.2,marginBottom:8}}>Comment veux-tu<br/>planifier ?</h1>
+        <p style={{fontSize:14,color:C.t2}}>Choisis ton style de voyage</p>
+      </div>
+      <div style={{display:'flex',flexDirection:'column',gap:14,width:'100%',maxWidth:420}}>
+        <button className="pop-in" onClick={()=>setTripMode('ai')} style={{background:'linear-gradient(135deg,rgba(0,122,255,.16) 0%,rgba(0,122,255,.07) 100%)',border:'1.5px solid rgba(0,122,255,.45)',borderRadius:20,padding:'22px 20px',textAlign:'left',color:'#fff',cursor:'pointer',transition:'transform .15s,border-color .15s',animationDelay:'.04s'}} onMouseEnter={e=>{e.currentTarget.style.transform='scale(1.02)';e.currentTarget.style.borderColor='rgba(0,122,255,.75)'}} onMouseLeave={e=>{e.currentTarget.style.transform='scale(1)';e.currentTarget.style.borderColor='rgba(0,122,255,.45)'}}>
+          <div style={{display:'flex',alignItems:'center',gap:14,marginBottom:12}}>
+            <span style={{fontSize:34}}>🤖</span>
+            <div style={{flex:1}}>
+              <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:2}}>
+                <p style={{fontFamily:'Syne,sans-serif',fontSize:18,fontWeight:800,color:C.accent}}>Assistant IA</p>
+                <span style={{background:'rgba(0,122,255,.25)',color:C.accent,borderRadius:8,padding:'2px 9px',fontSize:11,fontWeight:700}}>Recommandé</span>
+              </div>
+              <p style={{fontSize:12,color:C.t2}}>L'IA génère ton itinéraire complet</p>
+            </div>
+          </div>
+          <div style={{display:'flex',flexDirection:'column',gap:5}}>
+            {['✨ Activités & restos suggérés par l\'IA','☑️ Coche uniquement ce qui te plaît','🔄 Remplace chaque suggestion facilement','➕ Ajoute tes propres idées à tout moment'].map(txt=>(<p key={txt} style={{fontSize:12,color:C.t2,display:'flex',alignItems:'center',gap:7}}><span style={{color:C.accent,fontWeight:800}}>›</span>{txt}</p>))}
+          </div>
+        </button>
+        <button className="pop-in" onClick={()=>setTripMode('manual')} style={{background:'rgba(255,255,255,.04)',border:`1.5px solid ${C.border}`,borderRadius:20,padding:'22px 20px',textAlign:'left',color:'#fff',cursor:'pointer',transition:'transform .15s,border-color .15s',animationDelay:'.09s'}} onMouseEnter={e=>{e.currentTarget.style.transform='scale(1.02)';e.currentTarget.style.borderColor='rgba(255,255,255,.28)'}} onMouseLeave={e=>{e.currentTarget.style.transform='scale(1)';e.currentTarget.style.borderColor=C.border}}>
+          <div style={{display:'flex',alignItems:'center',gap:14,marginBottom:12}}>
+            <span style={{fontSize:34}}>✍️</span>
+            <div>
+              <p style={{fontFamily:'Syne,sans-serif',fontSize:18,fontWeight:800}}>Expert Manuel</p>
+              <p style={{fontSize:12,color:C.t2,marginTop:2}}>Page blanche, liberté totale</p>
+            </div>
+          </div>
+          <div style={{display:'flex',flexDirection:'column',gap:5}}>
+            {['📝 Tu ajoutes chaque élément toi-même','🎯 Aucune suggestion automatique','💡 Active l\'IA section par section si besoin','🔗 Tous les outils de recherche disponibles'].map(txt=>(<p key={txt} style={{fontSize:12,color:C.t2,display:'flex',alignItems:'center',gap:7}}><span style={{color:C.t3,fontWeight:800}}>›</span>{txt}</p>))}
+          </div>
+        </button>
+      </div>
+      <button onClick={onClose} style={{background:'none',border:'none',color:C.t3,fontSize:13,marginTop:22,cursor:'pointer',padding:'8px 20px'}}>Annuler</button>
+    </div>
+  );
 
   return(
     <>
     <div onClick={onClose} style={{position:'fixed',inset:0,background:'rgba(0,0,0,.85)',backdropFilter:'blur(12px)',zIndex:200,display:'flex',alignItems:'flex-end',justifyContent:'center'}}>
       <div onClick={e=>e.stopPropagation()} className="slide-bottom" style={{background:C.s2,borderRadius:'24px 24px 0 0',width:'100%',maxWidth:520,maxHeight:'92vh',overflowY:'auto',padding:'24px 22px 56px'}}>
-        <div style={{display:'flex',gap:4,marginBottom:22}}>{WIZARD_STEPS.map((ws,i)=>(<div key={ws.id} style={{flex:1,height:4,borderRadius:4,background:i<=step?C.accent:'rgba(255,255,255,.1)',transition:'background .3s'}}/>))}</div>
+        {/* Mode badge */}
+        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:14}}>
+          <span style={{background:tripMode==='ai'?'rgba(0,122,255,.18)':'rgba(255,255,255,.07)',border:`1px solid ${tripMode==='ai'?'rgba(0,122,255,.4)':C.border}`,borderRadius:8,padding:'3px 10px',fontSize:11,fontWeight:700,color:tripMode==='ai'?C.accent:C.t3}}>
+            {tripMode==='ai'?'🤖 Mode IA':'✍️ Mode Manuel'}
+          </span>
+          {!existing&&<button onClick={()=>{setTripMode(null);setStep(0);}} style={{background:'none',border:'none',color:C.t3,fontSize:11,cursor:'pointer',textDecoration:'underline'}}>Changer de mode</button>}
+        </div>
+        <div style={{display:'flex',gap:4,marginBottom:22}}>{STEPS.map((ws,i)=>(<div key={ws.id} style={{flex:1,height:4,borderRadius:4,background:i<=step?C.accent:'rgba(255,255,255,.1)',transition:'background .3s'}}/>))}</div>
         <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:20}}>
-          <div><p style={{fontSize:11,color:C.accent,fontWeight:700,textTransform:'uppercase',letterSpacing:1.5,marginBottom:4}}>Étape {step+1}/{WIZARD_STEPS.length}</p><h2 style={{fontFamily:'Syne,sans-serif',fontSize:22,fontWeight:800}}>{WIZARD_STEPS[step].icon} {WIZARD_STEPS[step].title}</h2><p style={{fontSize:13,color:C.t2,marginTop:3}}>{WIZARD_STEPS[step].desc}</p></div>
+          <div><p style={{fontSize:11,color:C.accent,fontWeight:700,textTransform:'uppercase',letterSpacing:1.5,marginBottom:4}}>Étape {step+1}/{STEPS.length}</p><h2 style={{fontFamily:'Syne,sans-serif',fontSize:22,fontWeight:800}}>{STEPS[step].icon} {STEPS[step].title}</h2><p style={{fontSize:13,color:C.t2,marginTop:3}}>{STEPS[step].desc}</p></div>
           <button onClick={onClose} style={{background:C.s3,borderRadius:10,color:C.t2,width:32,height:32,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>{I.x}</button>
         </div>
 
-        {/* Step 0 */}
-        {step===0&&(<div>
+        {/* Step 0 — Destination */}
+        {STEPS[step].id==='destination'&&(<div>
           <Field label="Titre du voyage *"><input value={t.title} onChange={e=>s('title',e.target.value)} placeholder="Mon aventure à Tokyo..."/></Field>
           <Field label="Destination *"><div style={{position:'relative'}}><input value={t.destination} onChange={e=>s('destination',e.target.value)} onBlur={handleDestinationBlur} placeholder="Tokyo, Bali, Barcelone..."/>{geocoding&&<span className="spin" style={{position:'absolute',right:14,top:'50%',transform:'translateY(-50%)',display:'inline-block',width:14,height:14,border:`2px solid ${C.accent}`,borderTopColor:'transparent',borderRadius:'50%'}}/>}{t.lat&&!geocoding&&<span style={{position:'absolute',right:14,top:'50%',transform:'translateY(-50%)',fontSize:12,color:C.green}}>📍</span>}</div></Field>
           <Row><Field label="Départ *" half><input type="date" value={t.start_date} onChange={e=>s('start_date',e.target.value)}/></Field><Field label="Retour" half><input type="date" value={t.end_date} onChange={e=>s('end_date',e.target.value)}/></Field></Row>
           {dur>0&&<div style={{background:C.accent+'15',border:`1px solid ${C.accent}30`,borderRadius:12,padding:'10px 14px',marginBottom:10}}><p style={{fontSize:13,color:C.accent,fontWeight:600}}>✈️ {dur} jour{dur>1?'s':''}</p></div>}
-          {/* Month preview */}
-          {db&&monthScore&&(
-            <div style={{background:`${SCORE_C[monthScore.s]}10`,border:`1px solid ${SCORE_C[monthScore.s]}30`,borderRadius:12,padding:'12px 14px'}}>
-              <p style={{fontSize:12,color:SCORE_C[monthScore.s],fontWeight:700,marginBottom:3}}>{monthScore.wx} {MONTH_FULL[selMonth]} à {db.name} — {SCORE_L[monthScore.s]}</p>
-              <p style={{fontSize:12,color:C.t2}}>{monthScore.note}</p>
-              <button onClick={()=>setShowAdvisor(true)} style={{background:'none',color:C.accent,fontSize:12,marginTop:6,fontWeight:600,display:'flex',alignItems:'center',gap:4}}>Voir toutes les périodes →</button>
-            </div>
-          )}
+          {db&&monthScore&&(<div style={{background:`${SCORE_C[monthScore.s]}10`,border:`1px solid ${SCORE_C[monthScore.s]}30`,borderRadius:12,padding:'12px 14px'}}><p style={{fontSize:12,color:SCORE_C[monthScore.s],fontWeight:700,marginBottom:3}}>{monthScore.wx} {MONTH_FULL[selMonth]} à {db.name} — {SCORE_L[monthScore.s]}</p><p style={{fontSize:12,color:C.t2}}>{monthScore.note}</p><button onClick={()=>setShowAdvisor(true)} style={{background:'none',color:C.accent,fontSize:12,marginTop:6,fontWeight:600,display:'flex',alignItems:'center',gap:4}}>Voir toutes les périodes →</button></div>)}
         </div>)}
 
-        {/* Step 1 — Advisor */}
-        {step===1&&(<div>
+        {/* Step AI_GENERATE — IA generates suggestions */}
+        {STEPS[step].id==='ai_generate'&&(<div>
+          <div style={{background:'rgba(0,122,255,.07)',border:'1px solid rgba(0,122,255,.2)',borderRadius:14,padding:'14px 16px',marginBottom:14}}>
+            <p style={{fontSize:13,color:C.t2,lineHeight:1.6}}>L'IA va suggérer des activités et restaurants pour <strong style={{color:C.t1}}>{t.destination}</strong>.<br/>Coche uniquement ce qui t'intéresse.</p>
+          </div>
+          {!aiGenDone&&!aiLoading&&(<button onClick={generateAI} style={{width:'100%',background:'linear-gradient(135deg,rgba(0,122,255,.2),rgba(0,122,255,.1))',border:'1.5px solid rgba(0,122,255,.45)',borderRadius:16,padding:'18px',fontFamily:'Syne,sans-serif',fontWeight:800,fontSize:16,color:C.accent,cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',gap:10}}>🤖 Générer mon itinéraire</button>)}
+          {aiLoading&&(<div style={{textAlign:'center',padding:'40px 20px'}}><div className="spin" style={{display:'inline-block',width:28,height:28,border:`3px solid ${C.accent}`,borderTopColor:'transparent',borderRadius:'50%',marginBottom:14}}/><p style={{fontSize:14,color:C.t2,fontWeight:600}}>L'IA prépare ton itinéraire...</p><p style={{fontSize:12,color:C.t3,marginTop:4}}>Activités · Restaurants · Conseils</p></div>)}
+          {aiGenDone&&aiSuggestions.length===0&&(<div style={{textAlign:'center',padding:'30px',color:C.t3}}><p style={{fontSize:36,marginBottom:10}}>😔</p><p>Génération échouée. Réessaie ou passe en mode manuel.</p><button onClick={generateAI} style={{background:C.accent+'20',border:`1px solid ${C.accent}40`,borderRadius:12,padding:'10px 18px',color:C.accent,fontWeight:600,fontSize:13,marginTop:14,cursor:'pointer'}}>🔄 Réessayer</button></div>)}
+          {aiSuggestions.length>0&&(<div>
+            <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:12}}>
+              <p style={{fontSize:13,fontWeight:600}}>{aiSuggestions.filter(s=>s.isChecked).length}/{aiSuggestions.length} suggestions sélectionnées</p>
+              <button onClick={generateAI} style={{background:'none',color:C.t3,fontSize:12,cursor:'pointer',display:'flex',alignItems:'center',gap:4}}>🔄 Régénérer</button>
+            </div>
+            <div style={{marginBottom:8}}>
+              <p style={{fontSize:11,color:C.t3,fontWeight:700,textTransform:'uppercase',letterSpacing:1,marginBottom:8}}>🎯 Activités</p>
+              {aiSuggestions.filter(s=>s.type==='activity').map((sg,i)=>{const realIdx=aiSuggestions.indexOf(sg);return(<div key={i} style={{borderRadius:14,padding:'14px 16px',marginBottom:8,border:`1.5px dashed ${sg.isChecked?'rgba(0,122,255,.45)':'rgba(255,255,255,.1)'}`,background:sg.isChecked?'rgba(0,122,255,.07)':'rgba(255,255,255,.02)',opacity:sg.isChecked?1:.55,transition:'all .18s'}}>
+                <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:6}}>
+                  <input type="checkbox" checked={sg.isChecked} onChange={()=>toggleAISuggestion(realIdx)} style={{width:16,height:16,accentColor:C.accent,flexShrink:0}}/>
+                  <span style={{fontSize:20}}>{sg.icon}</span>
+                  <span style={{fontFamily:'Syne,sans-serif',fontSize:14,fontWeight:700,flex:1}}>{sg.name}</span>
+                  <span style={{background:'rgba(0,122,255,.15)',color:C.accent,borderRadius:6,padding:'2px 7px',fontSize:11,fontWeight:700,whiteSpace:'nowrap'}}>{sg.price_range}</span>
+                </div>
+                <p style={{fontSize:12,color:C.t2,paddingLeft:26,lineHeight:1.5}}>{sg.description}</p>
+                {sg.tip&&<p style={{fontSize:11,color:C.orange,paddingLeft:26,marginTop:4}}>💡 {sg.tip}</p>}
+              </div>);})}
+            </div>
+            <div>
+              <p style={{fontSize:11,color:C.t3,fontWeight:700,textTransform:'uppercase',letterSpacing:1,marginBottom:8}}>🍽️ Restaurants</p>
+              {aiSuggestions.filter(s=>s.type==='restaurant').map((sg,i)=>{const realIdx=aiSuggestions.indexOf(sg);return(<div key={i} style={{borderRadius:14,padding:'14px 16px',marginBottom:8,border:`1.5px dashed ${sg.isChecked?'rgba(48,209,88,.4)':'rgba(255,255,255,.1)'}`,background:sg.isChecked?'rgba(48,209,88,.06)':'rgba(255,255,255,.02)',opacity:sg.isChecked?1:.55,transition:'all .18s'}}>
+                <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:6}}>
+                  <input type="checkbox" checked={sg.isChecked} onChange={()=>toggleAISuggestion(realIdx)} style={{width:16,height:16,accentColor:C.green,flexShrink:0}}/>
+                  <span style={{fontSize:20}}>{sg.icon}</span>
+                  <span style={{fontFamily:'Syne,sans-serif',fontSize:14,fontWeight:700,flex:1}}>{sg.name}</span>
+                  <span style={{background:'rgba(48,209,88,.15)',color:C.green,borderRadius:6,padding:'2px 7px',fontSize:11,fontWeight:700,whiteSpace:'nowrap'}}>{sg.price_range}</span>
+                </div>
+                <p style={{fontSize:12,color:C.t2,paddingLeft:26,lineHeight:1.5}}>{sg.description}</p>
+                {sg.tip&&<p style={{fontSize:11,color:C.orange,paddingLeft:26,marginTop:4}}>💡 {sg.tip}</p>}
+              </div>);})}
+            </div>
+          </div>)}
+        </div>)}
+
+        {/* Step ADVISOR */}
+        {STEPS[step].id==='advisor'&&(<div>
           {db?(
             <>
               <div style={{background:'rgba(0,122,255,.08)',border:'1px solid rgba(0,122,255,.2)',borderRadius:16,padding:'16px',marginBottom:14}}>
@@ -1831,28 +1985,29 @@ const CreateTripWizard=({onSave,onClose,existing})=>{
           )}
         </div>)}
 
-        {/* Step 2 — Budget */}
-        {step===2&&(<div>
+        {/* Step BUDGET */}
+        {STEPS[step].id==='budget'&&(<div>
           {t.advisor&&(<div style={{background:'rgba(0,122,255,.08)',border:'1px solid rgba(0,122,255,.2)',borderRadius:14,padding:'12px 16px',marginBottom:14}}><p style={{fontSize:13,color:C.accent,fontWeight:600}}>💡 Budget suggéré : {t.advisor.total_estimate?.low}–{t.advisor.total_estimate?.high}€</p><p style={{fontSize:11,color:C.t2,marginTop:2}}>Pour {daysCount(t.start_date,t.end_date)||7} nuits incluant vol, hôtel et repas</p></div>)}
           <Row><Field label="Budget total" half><input type="number" value={t.total_budget} onChange={e=>s('total_budget',e.target.value)} placeholder={t.advisor?.total_estimate?.low||"2000"}/></Field><Field label="Devise" half><select value={t.currency} onChange={e=>s('currency',e.target.value)}>{CURRENCIES.map(c=><option key={c} value={c}>{c}</option>)}</select></Field></Row>
           <Field label="Statut"><select value={t.status} onChange={e=>s('status',e.target.value)}><option value="planning">🔵 En préparation</option><option value="ongoing">🟢 En cours</option><option value="completed">⚪ Terminé</option></select></Field>
         </div>)}
 
-        {/* Step 3 — Style */}
-        {step===3&&(<div>
+        {/* Step STYLE */}
+        {STEPS[step].id==='style'&&(<div>
           <div style={{marginBottom:14}}><label style={{fontSize:12,color:C.t2,marginBottom:8,display:'block',fontWeight:500}}>Emoji</label><div style={{display:'flex',flexWrap:'wrap',gap:6}}>{EMOJIS.map(e=>(<button key={e} onClick={()=>s('cover_emoji',e)} style={{fontSize:22,background:t.cover_emoji===e?C.accent+'30':'rgba(255,255,255,.05)',border:`2px solid ${t.cover_emoji===e?C.accent:C.border}`,borderRadius:10,padding:'6px 9px'}}>{e}</button>))}</div></div>
           <Field label="Notes"><textarea value={t.notes} onChange={e=>s('notes',e.target.value)} placeholder="Idées, rappels..." rows={3} style={{resize:'none'}}/></Field>
+          {tripMode==='ai'&&aiSuggestions.filter(s=>s.isChecked).length>0&&(<div style={{background:'rgba(0,122,255,.08)',border:'1px solid rgba(0,122,255,.2)',borderRadius:12,padding:'12px 16px',marginTop:4}}><p style={{fontSize:13,color:C.accent,fontWeight:600}}>🤖 {aiSuggestions.filter(s=>s.isChecked).length} suggestions IA seront ajoutées à ton planning</p></div>)}
         </div>)}
 
         <div style={{display:'flex',gap:10,marginTop:20}}>
           {step>0?<Btn outline onClick={()=>setStep(p=>p-1)} style={{flex:1}}>{I.back} Retour</Btn>:<button onClick={onClose} style={{flex:1,background:'transparent',border:`1.5px solid ${C.border}`,color:C.t2,borderRadius:13,padding:'13px 22px',fontWeight:600,fontSize:15}}>Annuler</button>}
-          {step<WIZARD_STEPS.length-1?(
+          {step<STEPS.length-1?(
             <button onClick={()=>setStep(p=>p+1)} disabled={step===0&&!canProceed()} style={{flex:2,background:C.accent,border:'none',color:'#fff',borderRadius:13,padding:'13px 22px',fontWeight:700,fontSize:15,opacity:step===0&&!canProceed()?0.4:1,display:'flex',alignItems:'center',justifyContent:'center',gap:8}}>
               Suivant <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
             </button>
           ):<Btn style={{flex:2}} onClick={save}>🚀 Créer le voyage</Btn>}
         </div>
-        {step>0&&step<WIZARD_STEPS.length-1&&<button onClick={save} style={{background:'none',color:C.t3,fontSize:12,padding:'10px',marginTop:8,width:'100%'}}>Créer sans les étapes suivantes →</button>}
+        {step>0&&step<STEPS.length-1&&<button onClick={save} style={{background:'none',color:C.t3,fontSize:12,padding:'10px',marginTop:8,width:'100%'}}>Créer sans les étapes suivantes →</button>}
       </div>
     </div>
     {showAdvisor&&<SmartAdvisorModal destination={t.destination} dates={{start:t.start_date,end:t.end_date}} budget={t.total_budget} currency={t.currency} onClose={()=>setShowAdvisor(false)} onApply={(data)=>setT(p=>({...p,advisor:data}))}/>}
@@ -1893,11 +2048,13 @@ const SettingsModal=({deviceId,trips,onImport,onClose,onPull,syncStatus})=>{
 
 /* ══ TRIP DETAIL ════════════════════════════════════════ */
 function TripDetail({trip,onUpdate,onDelete,onBack,syncStatus,onShowCurrency,onExportPDF,deviceId,collabMode}){
-  const [tab,setTab]=useState('overview');const [modal,setModal]=useState(null);const [copied,setCopied]=useState(false);const [showAdvisor,setShowAdvisor]=useState(false);const [showCollab,setShowCollab]=useState(false);
+  const [tab,setTab]=useState('overview');const [modal,setModal]=useState(null);const [copied,setCopied]=useState(false);const [showAdvisor,setShowAdvisor]=useState(false);const [showCollab,setShowCollab]=useState(false);const [replaceTarget,setReplaceTarget]=useState(null);
   const add=(key,item)=>onUpdate({...trip,[key]:[...(trip[key]||[]),item]});
   const rm=(key,id)=>onUpdate({...trip,[key]:(trip[key]||[]).filter(x=>x.id!==id)});
+  const toggleActivity=(id)=>onUpdate({...trip,activities:(trip.activities||[]).map(a=>a.id===id?{...a,isChecked:a.isChecked===false?true:false}:a)});
+  const handleReplace=(suggestion)=>{const newAc={id:uid(),title:suggestion.name,icon:suggestion.icon,category:'other',date:replaceTarget.date||'',start_time:replaceTarget.start_time||'',price:0,notes:suggestion.description||'',is_booked:false,source:'ai',isChecked:true,description:suggestion.description,tip:suggestion.tip,status:'suggested'};onUpdate({...trip,activities:(trip.activities||[]).map(a=>a.id===replaceTarget.id?newAc:a)});setReplaceTarget(null);};
   const fl=trip.flights||[];const ho=trip.accommodations||[];const ac=trip.activities||[];const bi=trip.budget_items||[];
-  const flCost=fl.reduce((s,f)=>s+(+f.price||0),0);const hoCost=ho.reduce((s,h)=>s+(+h.total_price||0),0);const acCost=ac.reduce((s,a)=>s+(+a.price||0),0);const biCost=bi.reduce((s,b)=>s+(b.actual!=null?+b.actual:+b.estimated||0),0);
+  const flCost=fl.reduce((s,f)=>s+(+f.price||0),0);const hoCost=ho.reduce((s,h)=>s+(+h.total_price||0),0);const acCost=ac.filter(a=>a.isChecked!==false).reduce((s,a)=>s+(+a.price||0),0);const biCost=bi.reduce((s,b)=>s+(b.actual!=null?+b.actual:+b.estimated||0),0);
   const total=flCost+hoCost+acCost+biCost;const budget=+trip.total_budget||0;const pct=budget>0?Math.min(100,(total/budget)*100):0;const tripDur=daysCount(trip.start_date,trip.end_date);
   const checkDone=(trip.checklist||[]).filter(c=>c.checked).length;const checkTotal=(trip.checklist||genChecklist(trip)).length;
   const shareLink=()=>{const url=`${location.origin}${location.pathname}?share=${encShare(trip)}`;navigator.clipboard.writeText(url).catch(()=>{});setCopied(true);setTimeout(()=>setCopied(false),2500);};
@@ -1937,6 +2094,7 @@ function TripDetail({trip,onUpdate,onDelete,onBack,syncStatus,onShowCurrency,onE
           </div>
           <div style={{display:'flex',gap:7,flexWrap:'wrap',alignItems:'center'}}>
             <Tag color={STATUS_C[trip.status]}>{STATUS_L[trip.status]}</Tag>
+            {trip.trip_mode==='ai'&&<Tag color={C.accent}>🤖 Mode IA</Tag>}
             {trip.start_date&&<Tag color={C.t3}>{fd(trip.start_date)}{trip.end_date?` → ${fd(trip.end_date)}`:''}</Tag>}
             {budget>0&&<Tag color={pct>90?C.red:pct>70?C.orange:C.green}>{fc(total,trip.currency)}/{fc(budget,trip.currency)}</Tag>}
           </div>
@@ -2006,8 +2164,31 @@ function TripDetail({trip,onUpdate,onDelete,onBack,syncStatus,onShowCurrency,onE
         {tab==='activities'&&(
           <div className="fade-up">
             <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:14}}><h3 style={{fontFamily:'Syne,sans-serif',fontSize:17,fontWeight:700}}>Activités</h3><Btn sm color={C.green} onClick={()=>setModal('activity')}>{I.plus} Ajouter</Btn></div>
+            {ac.some(a=>a.source==='ai')&&(<div style={{background:'rgba(0,122,255,.07)',border:'1px solid rgba(0,122,255,.18)',borderRadius:12,padding:'10px 14px',marginBottom:12,display:'flex',alignItems:'center',gap:10}}><span style={{fontSize:16}}>🤖</span><p style={{fontSize:12,color:C.t2,flex:1}}>Les suggestions <span style={{color:C.accent,fontWeight:700}}>bordure pointillée</span> viennent de l'IA. Décoche pour les retirer du budget.</p></div>)}
             {ac.length===0?(<div style={{textAlign:'center',padding:'40px 20px',color:C.t3}}><div style={{fontSize:44,marginBottom:12}}>🎯</div><p style={{marginBottom:16}}>Aucune activité</p><div style={{display:'flex',gap:8,justifyContent:'center'}}><a href={DL.gyg(trip.destination,trip.start_date)} target="_blank" rel="noopener noreferrer" style={{background:'rgba(0,182,122,.15)',border:'1px solid rgba(0,182,122,.3)',borderRadius:10,padding:'8px 14px',fontSize:13,color:'#00b67a',textDecoration:'none',fontWeight:600}}>🟢 GetYourGuide</a><a href={DL.viator(trip.destination,trip.start_date)} target="_blank" rel="noopener noreferrer" style={{background:'rgba(238,100,34,.15)',border:'1px solid rgba(238,100,34,.3)',borderRadius:10,padding:'8px 14px',fontSize:13,color:'#ee6422',textDecoration:'none',fontWeight:600}}>🟠 Viator</a></div></div>):
-            ac.sort((a,b)=>(a.date||'').localeCompare(b.date||'')).map(a=>(<div key={a.id} className="glass scale-in" style={{borderRadius:16,padding:'16px 18px',marginBottom:10}}><div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start'}}><div style={{flex:1,minWidth:0}}><div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap',marginBottom:4}}><span style={{fontSize:18}}>{CAT_I[a.category]||'📌'}</span><span style={{fontFamily:'Syne,sans-serif',fontSize:15,fontWeight:700}}>{a.title}</span>{a.is_booked&&<Tag color={C.green} sm>✓</Tag>}</div><p style={{fontSize:13,color:C.t2}}>{fd(a.date)}{a.start_time?` · ${a.start_time}`:''}</p></div><div style={{display:'flex',flexDirection:'column',alignItems:'flex-end',gap:6,marginLeft:10}}>{a.price>0&&<span style={{fontFamily:'Syne,sans-serif',fontSize:15,fontWeight:700,color:C.green}}>{fc(a.price,trip.currency)}</span>}<button onClick={()=>rm('activities',a.id)} style={{background:'none',color:C.red+'70',padding:4,display:'flex'}}>{I.trash}</button></div></div></div>))}
+            ac.sort((a,b)=>(a.date||'').localeCompare(b.date||'')).map(a=>{
+              const isAI=a.source==='ai';
+              const checked=a.isChecked!==false;
+              return(<div key={a.id} className="glass scale-in" style={{borderRadius:16,padding:'16px 18px',marginBottom:10,border:`1.5px ${isAI?'dashed':'solid'} ${isAI&&checked?'rgba(0,122,255,.42)':isAI?'rgba(255,255,255,.1)':'rgba(255,255,255,.08)'}`,background:isAI&&checked?'rgba(0,122,255,.04)':isAI&&!checked?'rgba(255,255,255,.02)':undefined,opacity:checked?1:.55,transition:'opacity .2s,border-color .2s'}}>
+                {isAI&&(<div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:10}}>
+                  <span style={{background:'rgba(0,122,255,.18)',border:'1px solid rgba(0,122,255,.32)',borderRadius:7,padding:'2px 9px',fontSize:11,fontWeight:700,color:C.accent}}>✨ Suggéré par l'IA</span>
+                  <button onClick={()=>setReplaceTarget(a)} style={{background:'rgba(255,159,10,.12)',border:'1px solid rgba(255,159,10,.28)',borderRadius:9,padding:'4px 11px',fontSize:11,fontWeight:700,color:C.orange,cursor:'pointer',display:'flex',alignItems:'center',gap:5}}>🔄 Remplacer</button>
+                </div>)}
+                <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start'}}>
+                  <div style={{flex:1,minWidth:0}}>
+                    {isAI&&(<div style={{display:'flex',alignItems:'center',gap:8,marginBottom:8}}>
+                      <input type="checkbox" checked={checked} onChange={()=>toggleActivity(a.id)} style={{width:16,height:16,accentColor:C.accent,cursor:'pointer'}}/>
+                      <label style={{fontSize:12,color:checked?C.t2:C.t3,cursor:'pointer'}} onClick={()=>toggleActivity(a.id)}>{checked?'Inclus dans le planning':'Exclu du planning'}</label>
+                    </div>)}
+                    <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap',marginBottom:4}}><span style={{fontSize:18}}>{a.icon||CAT_I[a.category]||'📌'}</span><span style={{fontFamily:'Syne,sans-serif',fontSize:15,fontWeight:700,color:checked?C.t1:C.t3}}>{a.title||a.name}</span>{a.is_booked&&<Tag color={C.green} sm>✓</Tag>}</div>
+                    <p style={{fontSize:13,color:C.t2}}>{fd(a.date)}{a.start_time?` · ${a.start_time}`:''}</p>
+                    {isAI&&a.description&&<p style={{fontSize:12,color:C.t3,marginTop:6,lineHeight:1.5}}>{a.description}</p>}
+                    {isAI&&a.tip&&<p style={{fontSize:11,color:C.orange,marginTop:4}}>💡 {a.tip}</p>}
+                  </div>
+                  <div style={{display:'flex',flexDirection:'column',alignItems:'flex-end',gap:6,marginLeft:10}}>{a.price>0&&<span style={{fontFamily:'Syne,sans-serif',fontSize:15,fontWeight:700,color:C.green}}>{fc(a.price,trip.currency)}</span>}<button onClick={()=>rm('activities',a.id)} style={{background:'none',color:C.red+'70',padding:4,display:'flex'}}>{I.trash}</button></div>
+                </div>
+              </div>);
+            })}
           </div>
         )}
 
@@ -2035,6 +2216,7 @@ function TripDetail({trip,onUpdate,onDelete,onBack,syncStatus,onShowCurrency,onE
       {modal==='budget'&&<BudgetForm trip={trip} onAdd={b=>add('budget_items',b)} onClose={()=>setModal(null)}/>}
       {modal==='edit'&&<CreateTripWizard existing={trip} onSave={upd=>onUpdate({...trip,...upd})} onClose={()=>setModal(null)}/>}
       {modal==='share'&&(<Modal onClose={()=>setModal(null)} title="Partager" icon="🔗"><button onClick={shareLink} style={{background:copied?C.green+'20':C.accent+'18',border:`1px solid ${copied?C.green:C.accent}35`,borderRadius:14,padding:'16px 20px',color:copied?C.green:C.accent,fontWeight:600,fontSize:15,display:'flex',alignItems:'center',gap:10,width:'100%',justifyContent:'center',transition:'all .2s'}}>{copied?I.check:I.copy} {copied?'Lien copié !':'Copier le lien de partage'}</button></Modal>)}
+      {replaceTarget&&<ReplaceModal item={replaceTarget} trip={trip} onReplace={handleReplace} onClose={()=>setReplaceTarget(null)}/>}
       {showAdvisor&&<SmartAdvisorModal destination={trip.destination} dates={{start:trip.start_date,end:trip.end_date}} budget={trip.total_budget} currency={trip.currency} onClose={()=>setShowAdvisor(false)} onApply={(data)=>onUpdate({...trip,advisor:data})}/>}
       {showCollab&&<CollabModal trip={trip} onClose={()=>setShowCollab(false)} onUpdate={onUpdate} deviceId={deviceId}/>}
     </div>
@@ -2175,7 +2357,7 @@ function App(){
   useEffect(()=>{if('serviceWorker' in navigator)navigator.serviceWorker.register('./sw.js').catch(()=>{});},[]);
 
   const createTrip=useCallback(async(t)=>{
-    const nt={...t,id:uid(),flights:[],accommodations:[],activities:[],budget_items:[],checklist:genChecklist(t),created_at:new Date().toISOString()};
+    const nt={...t,id:uid(),flights:[],accommodations:[],activities:t.activities||[],budget_items:[],checklist:genChecklist(t),created_at:new Date().toISOString()};
     if(!nt.lat&&nt.destination){const geo=await geocode(nt.destination);if(geo){nt.lat=geo.lat;nt.lng=geo.lng;}}
     save({...data,trips:[nt,...data.trips]});
   },[data,save]);
