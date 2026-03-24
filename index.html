@@ -1763,6 +1763,18 @@ const BudgetForm=({trip,onAdd,onClose})=>{
   return(<Modal onClose={onClose} title="Dépense" icon="💰"><Field label="Description"><input value={b.label} onChange={e=>s('label',e.target.value)} placeholder="Restaurant du soir..."/></Field><Field label="Catégorie"><select value={b.category} onChange={e=>s('category',e.target.value)}>{BUDGET_CATS.map(c=><option key={c} value={c}>{c}</option>)}</select></Field><Row><Field label="Estimé (€)" half><input type="number" value={b.estimated} onChange={e=>s('estimated',e.target.value)} placeholder="0"/></Field><Field label="Réel (€)" half><input type="number" value={b.actual} onChange={e=>s('actual',e.target.value)} placeholder="0"/></Field></Row><BudgetGauge trip={trip} newAmount={b.actual||b.estimated} label="cette dépense"/><div style={{display:'flex',alignItems:'center',gap:10,marginBottom:18}}><input type="checkbox" id="bb" checked={b.is_paid} onChange={e=>s('is_paid',e.target.checked)}/><label htmlFor="bb" style={{fontSize:14,cursor:'pointer'}}>✅ Payé</label></div><Btn full onClick={save}>{I.check} Ajouter</Btn></Modal>);
 };
 
+/* ══ PRICE RANGE PARSER ═══════════════════════════════════ */
+const parsePriceRange=(str)=>{
+  if(!str)return 0;
+  const s=str.replace(/[€$£]/g,'').trim();
+  if(s.toLowerCase()==='gratuit'||s==='0')return 0;
+  const range=s.match(/(\d+)\s*[-–]\s*(\d+)/);
+  if(range)return Math.round((+range[1]+ +range[2])/2);
+  const single=s.match(/(\d+)\+?/);
+  if(single)return +single[1];
+  return 0;
+};
+
 /* ══ WIZARD ══════════════════════════════════════════════ */
 const WIZARD_STEPS=[{id:'destination',title:'Où et quand ?',icon:'📍',desc:'Destination et dates'},{ id:'advisor',title:'Conseiller IA',icon:'🧠',desc:'Estimations et recommandations'},{id:'budget',title:'Budget',icon:'💰',desc:'Optionnel'},{id:'style',title:'Personnalise',icon:'🎨',desc:'Emoji et notes'}];
 const AI_WIZARD_STEPS=[{id:'destination',title:'Où et quand ?',icon:'📍',desc:'Destination et dates'},{id:'ai_generate',title:'Suggestions IA',icon:'🤖',desc:'L\'IA prépare ton itinéraire'},{id:'advisor',title:'Conseiller IA',icon:'🧠',desc:'Estimations et recommandations'},{id:'budget',title:'Budget',icon:'💰',desc:'Optionnel'},{id:'style',title:'Personnalise',icon:'🎨',desc:'Emoji et notes'}];
@@ -1813,7 +1825,7 @@ const ReplaceModal=({item,trip,onReplace,onClose})=>{
   );
 };
 const CreateTripWizard=({onSave,onClose,existing})=>{
-  const [tripMode,setTripMode]=useState(existing?.trip_mode||null);
+  const [tripMode,setTripMode]=useState(existing?(existing.trip_mode||'manual'):null);
   const [step,setStep]=useState(0);
   const [t,setT]=useState(existing||{title:'',destination:'',destination_iata:'',start_date:'',end_date:'',total_budget:'',currency:'EUR',status:'planning',cover_emoji:'✈️',notes:'',advisor:null});
   const [geocoding,setGeocoding]=useState(false);
@@ -1828,21 +1840,24 @@ const CreateTripWizard=({onSave,onClose,existing})=>{
   const canProceed=()=>step!==0||(t.title.length>0&&t.destination.length>0&&t.start_date.length>0);
   const toggleAISuggestion=(i)=>setAiSuggestions(p=>p.map((s,idx)=>idx===i?{...s,isChecked:!s.isChecked}:s));
   const generateAI=async()=>{
-    setAiLoading(true);setAiGenDone(false);setAiSuggestions([]);
+    setAiLoading(true);setAiGenDone(false);
+    const prevChecked=new Set(aiSuggestions.filter(s=>s.isChecked).map(s=>s.name));
+    setAiSuggestions([]);
     try{
       const prompt=`Tu es un expert voyageur. Génère 5 activités incontournables ET 3 restaurants emblématiques pour ${t.destination}. Budget indicatif: ${t.total_budget?t.total_budget+'€':'moyen'}. Réponds UNIQUEMENT en JSON valide sans markdown: {"suggestions":[{"name":"...","icon":"emoji","type":"activity|restaurant","description":"Une phrase concrète sur l'expérience","tip":"Conseil pratique court","price_range":"Gratuit|0-20€|20-50€|50€+","category":"Culture|Nature|Gastronomie|Shopping|Histoire|Détente"}]}`;
       const resp=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:1200,messages:[{role:'user',content:prompt}]})});
       const data=await resp.json();
       const text=data.content?.[0]?.text||'{}';
       const parsed=JSON.parse(text.replace(/```json|```/g,'').trim());
-      setAiSuggestions((parsed.suggestions||[]).map(s=>({...s,isChecked:true})));
+      // Preserve checked state for items with same name
+      setAiSuggestions((parsed.suggestions||[]).map(s=>({...s,isChecked:prevChecked.has(s.name)?true:prevChecked.size===0?true:true})));
       setAiGenDone(true);
     }catch(e){console.error(e);setAiGenDone(true);}
     finally{setAiLoading(false);}
   };
   const save=()=>{
     if(!t.title||!t.destination||!t.start_date){alert('Titre, destination et date requis');return;}
-    const activities=tripMode==='ai'?aiSuggestions.filter(s=>s.isChecked).map(s=>({id:uid(),title:s.name,icon:s.icon,category:s.type==='restaurant'?'food':'other',date:'',start_time:'',price:0,notes:s.description||'',is_booked:false,source:'ai',isChecked:true,description:s.description,tip:s.tip,status:'suggested'})):[];
+    const activities=tripMode==='ai'?aiSuggestions.filter(s=>s.isChecked).map(s=>({id:uid(),title:s.name,icon:s.icon,category:s.type==='restaurant'?'food':'other',date:'',start_time:'',price:parsePriceRange(s.price_range),notes:s.description||'',is_booked:false,source:'ai',isChecked:true,description:s.description,tip:s.tip,price_range:s.price_range,status:'suggested'})):[];
     onSave({...t,trip_mode:tripMode,total_budget:+t.total_budget||0,activities});
     onClose();
   };
@@ -2180,7 +2195,7 @@ function TripDetail({trip,onUpdate,onDelete,onBack,syncStatus,onShowCurrency,onE
                       <input type="checkbox" checked={checked} onChange={()=>toggleActivity(a.id)} style={{width:16,height:16,accentColor:C.accent,cursor:'pointer'}}/>
                       <label style={{fontSize:12,color:checked?C.t2:C.t3,cursor:'pointer'}} onClick={()=>toggleActivity(a.id)}>{checked?'Inclus dans le planning':'Exclu du planning'}</label>
                     </div>)}
-                    <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap',marginBottom:4}}><span style={{fontSize:18}}>{a.icon||CAT_I[a.category]||'📌'}</span><span style={{fontFamily:'Syne,sans-serif',fontSize:15,fontWeight:700,color:checked?C.t1:C.t3}}>{a.title||a.name}</span>{a.is_booked&&<Tag color={C.green} sm>✓</Tag>}</div>
+                    <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap',marginBottom:4}}><span style={{fontSize:18}}>{a.icon||CAT_I[a.category]||'📌'}</span><span style={{fontFamily:'Syne,sans-serif',fontSize:15,fontWeight:700,color:checked?C.t1:C.t3}}>{a.title||a.name}</span>{a.is_booked&&<Tag color={C.green} sm>✓</Tag>}{isAI&&a.price_range&&<span style={{background:'rgba(255,255,255,.07)',borderRadius:6,padding:'2px 8px',fontSize:11,color:C.t3,fontWeight:600}}>{a.price_range}</span>}</div>
                     <p style={{fontSize:13,color:C.t2}}>{fd(a.date)}{a.start_time?` · ${a.start_time}`:''}</p>
                     {isAI&&a.description&&<p style={{fontSize:12,color:C.t3,marginTop:6,lineHeight:1.5}}>{a.description}</p>}
                     {isAI&&a.tip&&<p style={{fontSize:11,color:C.orange,marginTop:4}}>💡 {a.tip}</p>}
